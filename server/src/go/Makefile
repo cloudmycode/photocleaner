@@ -1,4 +1,4 @@
-.PHONY: build run test clean
+.PHONY: build run clean
 
 # 编译
 build:
@@ -7,14 +7,6 @@ build:
 # 运行
 run: build
 	./smart-search
-
-# 测试
-test: build
-	go run test.go
-
-# 调用真实大模型测试 enrich prompt（需 DEEPSEEK_API_KEY）
-test-integration:
-	go test -tags=integration -run 'TestEnrichPromptLLM|TestEnrichPromptLLM_FromIndexJSON' -v -count=1 ./...
 
 # 清理
 clean:
@@ -36,7 +28,6 @@ help:
 	@echo "Targets:"
 	@echo "  make build   - Compile the server"
 	@echo "  make run     - Compile and run the server"
-	@echo "  make test    - Run tests"
 	@echo "  make clean   - Remove binary"
 	@echo "  make release - Build release version"
 	@echo "  make help    - Show this help"
