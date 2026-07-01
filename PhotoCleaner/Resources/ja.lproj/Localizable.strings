@@ -169,6 +169,7 @@
 "smart.search.placeholder" = "例：去年海南で撮った写真を探す";
 "smart.search.hold.to.speak" = "押したまま話す";
 "smart.search.listening" = "聞き取り中です。離すと解析します。";
+"smart.search.searching" = "検索中…";
 "smart.search.start" = "検索";
 "smart.search.dismiss.keyboard" = "キーボードを閉じる";
 "smart.search.understood" = "理解した条件";

@@ -201,6 +201,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     private var isRestoringMediaAssets = false
     private var isRestoringEmptyAlbums = false
     private var isRestoringMonthlyReviewProgress = false
+    private var didRestoreMonthlyAlbumsFromCache = false
     private var shouldRepairCachedMediaStorage = false
 
     override init() {
@@ -212,7 +213,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         shouldRepairCachedMediaStorage = shouldRepairCachedMediaStorage ||
             (hasCompletedInitialAnalysis &&
                 !UserDefaults.standard.bool(forKey: Self.mediaStorageRepairKey))
-        restoreMonthlyAlbumsFromCache()
         PHPhotoLibrary.shared().register(self)
     }
 
@@ -230,6 +230,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 scanState = .idle
                 return
             }
+            restoreMonthlyAlbumsIfNeeded()
             guard !hasRequestedStartupScan else { return }
             hasRequestedStartupScan = true
             if hasCompletedInitialAnalysis {
@@ -284,7 +285,22 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         }
     }
 
-    private func restoreMonthlyAlbumsFromCache() {
+    func restoreMonthlyAlbumsIfNeeded() {
+        guard !didRestoreMonthlyAlbumsFromCache else { return }
+        didRestoreMonthlyAlbumsFromCache = true
+        guard monthGroups.isEmpty else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            guard let groups = Self.loadMonthlyAlbumsFromCache(), !groups.isEmpty else { return }
+            await MainActor.run {
+                guard let self, self.monthGroups.isEmpty else { return }
+                self.monthGroups = groups
+                self.restoreMonthlyReviewProgressIfNeeded()
+                self.rebuildAllMonthlyProgress()
+            }
+        }
+    }
+
+    nonisolated private static func loadMonthlyAlbumsFromCache() -> [PhotoMonthGroup]? {
         let fileURL = FileManager.default.urls(
             for: .cachesDirectory,
             in: .userDomainMask
@@ -294,9 +310,9 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         guard let data = try? Data(contentsOf: fileURL),
               let payload = try? JSONDecoder().decode(MonthlyAlbumsCachePayload.self, from: data),
               payload.version == 1 else {
-            return
+            return nil
         }
-        let groups: [PhotoMonthGroup] = payload.groups.compactMap { cached in
+        return payload.groups.compactMap { cached in
             let options = PHFetchOptions()
             options.predicate = NSPredicate(
                 format: "localIdentifier IN %@",
@@ -318,11 +334,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 },
                 storageBytes: cached.storageBytes
             )
-        }
-        if !groups.isEmpty {
-            monthGroups = groups
-            restoreMonthlyReviewProgressIfNeeded()
-            rebuildAllMonthlyProgress()
         }
     }
 

@@ -3486,19 +3486,27 @@ struct SmartPhotoSearchView: View {
                     .font(.caption)
                     .foregroundStyle(Color.cleanerBlue)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if isParsing || isSearching {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(Color.cleanerBlue)
+                    Text("smart.search.searching")
+                        .font(.caption)
+                        .foregroundStyle(Color.cleanerBlue)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack(spacing: 10) {
-                holdToSpeakButton
-
-                TextField("smart.search.placeholder", text: $queryText, axis: .vertical)
+                TextField("smart.search.placeholder", text: $queryText)
                     .textFieldStyle(.plain)
-                    .lineLimit(1...3)
+                    .lineLimit(1)
                     .font(.subheadline)
                     .focused($isSearchFieldFocused)
-                    .submitLabel(.done)
+                    .submitLabel(.search)
                     .onSubmit {
-                        dismissSearchKeyboard()
+                        submitQuery(queryText)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
@@ -3509,7 +3517,7 @@ struct SmartPhotoSearchView: View {
                             .stroke(Color.cleanerBorder, lineWidth: 1)
                     }
 
-                searchButton
+                holdToSpeakButton
             }
         }
         .padding(.horizontal, 14)
@@ -3521,28 +3529,6 @@ struct SmartPhotoSearchView: View {
                 .fill(Color.cleanerBorder.opacity(0.8))
                 .frame(height: 0.5)
         }
-    }
-
-    private var searchButton: some View {
-        Button {
-            submitQuery(queryText)
-        } label: {
-            ZStack {
-                if isParsing || isSearching {
-                    ProgressView()
-                        .tint(.white)
-                } else {
-                    Image(systemName: "magnifyingglass")
-                        .font(.headline.weight(.semibold))
-                }
-            }
-            .foregroundStyle(.white)
-            .frame(width: 46, height: 46)
-            .background(Color.cleanerBlue, in: RoundedRectangle(cornerRadius: 8))
-        }
-        .disabled(queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isParsing || isSearching)
-        .opacity(queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.55 : 1)
-        .accessibilityLabel(Text("smart.search.start"))
     }
 
     private var resultsTitle: String {

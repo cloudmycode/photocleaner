@@ -169,6 +169,7 @@
 "smart.search.placeholder" = "Example: find photos from last year in Hainan";
 "smart.search.hold.to.speak" = "Hold to speak";
 "smart.search.listening" = "Listening. Release to understand.";
+"smart.search.searching" = "Searching…";
 "smart.search.start" = "Search";
 "smart.search.dismiss.keyboard" = "Close keyboard";
 "smart.search.understood" = "Understood";

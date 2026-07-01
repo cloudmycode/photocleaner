@@ -169,6 +169,7 @@
 "smart.search.placeholder" = "例如：找出去年去海南玩的图";
 "smart.search.hold.to.speak" = "按住说话";
 "smart.search.listening" = "正在听你说话，松手后开始理解";
+"smart.search.searching" = "正在找图…";
 "smart.search.start" = "开始找图";
 "smart.search.dismiss.keyboard" = "关闭键盘";
 "smart.search.understood" = "理解结果";
