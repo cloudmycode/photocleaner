@@ -9,9 +9,9 @@ func normalizeSearchPlan(raw map[string]interface{}, summary string, cfg *Config
 	plan := SearchPlan{
 		Summary: summary,
 		Must: MustMatch{
-			VisualTagsAll:  []string{},
-			SensitiveTypes: []string{},
-			OcrContainsAll: []string{},
+			VisualTagGroups: [][]string{},
+			SensitiveTypes:  []string{},
+			OcrContainsAll:  []string{},
 		},
 		Count: cfg.DefaultCount,
 	}
@@ -35,8 +35,8 @@ func ensureMustArrays(must MustMatch) MustMatch {
 	if must.SearchKeywordGroups == nil {
 		must.SearchKeywordGroups = [][]string{}
 	}
-	if must.VisualTagsAll == nil {
-		must.VisualTagsAll = []string{}
+	if must.VisualTagGroups == nil {
+		must.VisualTagGroups = [][]string{}
 	}
 	if must.SensitiveTypes == nil {
 		must.SensitiveTypes = []string{}
@@ -52,7 +52,7 @@ func emptySearchPlan(query string, cfg *Config) SearchPlan {
 		Summary: query,
 		Must: MustMatch{
 			SearchKeywordGroups: [][]string{},
-			VisualTagsAll:       []string{},
+			VisualTagGroups:     [][]string{},
 			SensitiveTypes:      []string{},
 			OcrContainsAll:      []string{},
 		},
@@ -105,32 +105,49 @@ func mergeFiltersFromMap(filters *Filters, m map[string]interface{}) {
 func extractMust(raw map[string]interface{}) MustMatch {
 	must := MustMatch{
 		SearchKeywordGroups: [][]string{},
-		VisualTagsAll:       []string{},
+		VisualTagGroups:     [][]string{},
 		SensitiveTypes:      []string{},
 		OcrContainsAll:      []string{},
 	}
 
 	if nested, ok := raw["must"].(map[string]interface{}); ok {
 		must.SearchKeywordGroups = append(must.SearchKeywordGroups, stringMatrixField(nested, "searchKeywordGroups")...)
-		must.VisualTagsAll = append(must.VisualTagsAll, normalizeVisualTags(stringSliceField(nested, "visualTagsAll"))...)
+		must.VisualTagGroups = append(must.VisualTagGroups, stringMatrixField(nested, "visualTagGroups")...)
+		must.VisualTagGroups = append(must.VisualTagGroups, flatTagsToGroups(normalizeVisualTags(stringSliceField(nested, "visualTagsAll")))...)
 		must.SensitiveTypes = append(must.SensitiveTypes, normalizeSensitiveTypes(stringSliceField(nested, "sensitiveTypes"))...)
 		must.OcrContainsAll = append(must.OcrContainsAll, stringSliceField(nested, "ocrContainsAll")...)
 	}
 
 	must.SearchKeywordGroups = append(must.SearchKeywordGroups, stringMatrixField(raw, "searchKeywordGroups")...)
-	must.VisualTagsAll = append(must.VisualTagsAll, normalizeVisualTags(stringSliceField(raw, "visualTagsAll"))...)
-	must.VisualTagsAll = append(must.VisualTagsAll, normalizeLegacyKeywords(stringSliceField(raw, "keywords"))...)
-	must.VisualTagsAll = append(must.VisualTagsAll, visualTagsFromConcepts(raw)...)
+	must.VisualTagGroups = append(must.VisualTagGroups, stringMatrixField(raw, "visualTagGroups")...)
+	must.VisualTagGroups = append(must.VisualTagGroups, flatTagsToGroups(normalizeVisualTags(stringSliceField(raw, "visualTagsAll")))...)
+	must.VisualTagGroups = append(must.VisualTagGroups, flatTagsToGroups(normalizeLegacyKeywords(stringSliceField(raw, "keywords")))...)
+	must.VisualTagGroups = append(must.VisualTagGroups, flatTagsToGroups(visualTagsFromConcepts(raw))...)
 	must.SensitiveTypes = append(must.SensitiveTypes, normalizeSensitiveTypes(stringSliceField(raw, "sensitiveTypes"))...)
 	must.OcrContainsAll = append(must.OcrContainsAll, stringSliceField(raw, "ocrKeywords")...)
 	must.OcrContainsAll = append(must.OcrContainsAll, stringSliceField(raw, "ocrContainsAll")...)
 
 	must.SearchKeywordGroups = normalizeKeywordGroups(must.SearchKeywordGroups)
-	must.VisualTagsAll = uniqueStrings(must.VisualTagsAll)
+	must.VisualTagGroups = normalizeKeywordGroups(must.VisualTagGroups)
 	must.SensitiveTypes = uniqueStrings(must.SensitiveTypes)
 	must.OcrContainsAll = uniqueStrings(must.OcrContainsAll)
 
 	return must
+}
+
+// flatTagsToGroups 将扁平 tag 列表转成单元素组（每个 tag 独立成组，组间 AND），兼容旧字段
+func flatTagsToGroups(tags []string) [][]string {
+	if len(tags) == 0 {
+		return nil
+	}
+	groups := make([][]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag != "" {
+			groups = append(groups, []string{tag})
+		}
+	}
+	return groups
 }
 
 func stringMatrixField(m map[string]interface{}, key string) [][]string {
@@ -387,10 +404,10 @@ func normalizeVisualTags(tags []string) []string {
 	return uniqueStrings(out)
 }
 
-// filterVisualTagsInAvailable 只保留客户端词表中存在的 tag（防模型幻觉）
-func filterVisualTagsInAvailable(tags, available []string) []string {
-	if len(tags) == 0 {
-		return []string{}
+// filterVisualTagGroupsInAvailable 逐组只保留客户端词表中存在的 tag（防模型幻觉），丢弃空组
+func filterVisualTagGroupsInAvailable(groups [][]string, available []string) [][]string {
+	if len(groups) == 0 {
+		return [][]string{}
 	}
 	allowed := make(map[string]struct{}, len(available))
 	for _, t := range available {
@@ -399,10 +416,16 @@ func filterVisualTagsInAvailable(tags, available []string) []string {
 			allowed[t] = struct{}{}
 		}
 	}
-	out := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		if _, ok := allowed[tag]; ok {
-			out = append(out, tag)
+	out := make([][]string, 0, len(groups))
+	for _, group := range groups {
+		kept := make([]string, 0, len(group))
+		for _, tag := range group {
+			if _, ok := allowed[tag]; ok {
+				kept = append(kept, tag)
+			}
+		}
+		if len(kept) > 0 {
+			out = append(out, kept)
 		}
 	}
 	return out

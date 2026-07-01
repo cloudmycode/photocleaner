@@ -17,7 +17,10 @@ func TestNormalizeSearchPlan_NewFormat(t *testing.T) {
 			},
 		},
 		"must": map[string]interface{}{
-			"visualTagsAll":  []interface{}{"beach", "person"},
+			"visualTagGroups": []interface{}{
+				[]interface{}{"beach", "sea"},
+				[]interface{}{"person"},
+			},
 			"sensitiveTypes": []interface{}{},
 			"ocrContainsAll": []interface{}{},
 		},
@@ -30,8 +33,8 @@ func TestNormalizeSearchPlan_NewFormat(t *testing.T) {
 	if plan.Summary != "beach photos with people" {
 		t.Fatalf("summary: got %q", plan.Summary)
 	}
-	if len(plan.Must.VisualTagsAll) != 2 || plan.Must.VisualTagsAll[0] != "beach" {
-		t.Fatalf("visualTagsAll: %v", plan.Must.VisualTagsAll)
+	if len(plan.Must.VisualTagGroups) != 2 || plan.Must.VisualTagGroups[0][0] != "beach" {
+		t.Fatalf("visualTagGroups: %v", plan.Must.VisualTagGroups)
 	}
 	if plan.Count != 50 {
 		t.Fatalf("count: got %d", plan.Count)
@@ -52,9 +55,13 @@ func TestNormalizeSearchPlan_LegacyKeywords(t *testing.T) {
 	plan := normalizeSearchPlan(raw, "q", cfg)
 
 	wantTags := map[string]bool{"white": true, "car": true, "beach": true}
-	for _, tag := range plan.Must.VisualTagsAll {
+	for _, group := range plan.Must.VisualTagGroups {
+		if len(group) != 1 {
+			t.Fatalf("legacy tag should be single-element group: %v", group)
+		}
+		tag := group[0]
 		if !wantTags[tag] {
-			t.Fatalf("unexpected tag %q in %v", tag, plan.Must.VisualTagsAll)
+			t.Fatalf("unexpected tag %q in %v", tag, plan.Must.VisualTagGroups)
 		}
 		delete(wantTags, tag)
 	}
@@ -85,11 +92,11 @@ func TestNormalizeSearchPlan_VisualConcepts(t *testing.T) {
 	}
 
 	plan := normalizeSearchPlan(raw, "q", cfg)
-	if len(plan.Must.VisualTagsAll) != 2 {
-		t.Fatalf("expected 2 tags, got %v", plan.Must.VisualTagsAll)
+	if len(plan.Must.VisualTagGroups) != 2 {
+		t.Fatalf("expected 2 tags, got %v", plan.Must.VisualTagGroups)
 	}
-	if plan.Must.VisualTagsAll[0] != "cat" || plan.Must.VisualTagsAll[1] != "beach" {
-		t.Fatalf("tags: %v", plan.Must.VisualTagsAll)
+	if plan.Must.VisualTagGroups[0][0] != "cat" || plan.Must.VisualTagGroups[1][0] != "beach" {
+		t.Fatalf("tags: %v", plan.Must.VisualTagGroups)
 	}
 }
 
@@ -97,33 +104,36 @@ func TestNormalizeSearchPlan_PreservesUnderscoreTags(t *testing.T) {
 	cfg := DefaultConfig()
 	raw := map[string]interface{}{
 		"must": map[string]interface{}{
-			"visualTagsAll": []interface{}{"gray_clothing", "person"},
+			"visualTagGroups": []interface{}{
+				[]interface{}{"gray_clothing", "person"},
+			},
 		},
 	}
 
 	plan := normalizeSearchPlan(raw, "q", cfg)
-	if len(plan.Must.VisualTagsAll) != 2 {
-		t.Fatalf("got %v", plan.Must.VisualTagsAll)
+	if len(plan.Must.VisualTagGroups) != 1 || len(plan.Must.VisualTagGroups[0]) != 2 {
+		t.Fatalf("got %v", plan.Must.VisualTagGroups)
 	}
-	if plan.Must.VisualTagsAll[0] != "gray_clothing" {
-		t.Fatalf("underscore tag altered: %v", plan.Must.VisualTagsAll)
+	if plan.Must.VisualTagGroups[0][0] != "gray_clothing" {
+		t.Fatalf("underscore tag altered: %v", plan.Must.VisualTagGroups)
 	}
 }
 
-func TestFilterVisualTagsInAvailable(t *testing.T) {
+func TestFilterVisualTagGroupsInAvailable(t *testing.T) {
 	available := []string{"person", "beach", "gray_clothing", "car"}
-	got := filterVisualTagsInAvailable(
-		[]string{"person", "white", "shore", "gray_clothing"},
+	got := filterVisualTagGroupsInAvailable(
+		[][]string{{"person", "white", "shore"}, {"gray_clothing"}, {"unknown"}},
 		available,
 	)
-	want := []string{"person", "gray_clothing"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v want %v", got, want)
+	// 第一组保留 person，第二组保留 gray_clothing，第三组全无效被丢弃
+	if len(got) != 2 {
+		t.Fatalf("got %v", got)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v want %v", got, want)
-		}
+	if len(got[0]) != 1 || got[0][0] != "person" {
+		t.Fatalf("group0: %v", got[0])
+	}
+	if len(got[1]) != 1 || got[1][0] != "gray_clothing" {
+		t.Fatalf("group1: %v", got[1])
 	}
 }
 
@@ -143,7 +153,7 @@ func TestUniqueStringsJSONEmptyArray(t *testing.T) {
 
 func TestEnsureMustArrays(t *testing.T) {
 	m := ensureMustArrays(MustMatch{})
-	if m.SearchKeywordGroups == nil || m.VisualTagsAll == nil || m.SensitiveTypes == nil || m.OcrContainsAll == nil {
+	if m.SearchKeywordGroups == nil || m.VisualTagGroups == nil || m.SensitiveTypes == nil || m.OcrContainsAll == nil {
 		t.Fatalf("ensureMustArrays: %+v", m)
 	}
 }
@@ -156,7 +166,7 @@ func TestNormalizeSearchPlan_KeywordGroups(t *testing.T) {
 				[]interface{}{"路由器", "router", "wifi"},
 				[]interface{}{"账号", "account"},
 			},
-			"visualTagsAll": []interface{}{},
+			"visualTagGroups": []interface{}{},
 		},
 	}
 
@@ -167,8 +177,8 @@ func TestNormalizeSearchPlan_KeywordGroups(t *testing.T) {
 	if len(plan.Must.SearchKeywordGroups[0]) != 3 {
 		t.Fatalf("group0: %v", plan.Must.SearchKeywordGroups[0])
 	}
-	if len(plan.Must.VisualTagsAll) != 0 {
-		t.Fatalf("visualTagsAll should be empty: %v", plan.Must.VisualTagsAll)
+	if len(plan.Must.VisualTagGroups) != 0 {
+		t.Fatalf("visualTagGroups should be empty: %v", plan.Must.VisualTagGroups)
 	}
 }
 

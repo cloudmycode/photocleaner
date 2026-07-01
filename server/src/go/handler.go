@@ -120,7 +120,7 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 	}
 
 	plan := normalizeSearchPlan(raw, query, h.config)
-	plan.Must.VisualTagsAll = filterVisualTagsInAvailable(plan.Must.VisualTagsAll, req.AvailableTags)
+	plan.Must.VisualTagGroups = filterVisualTagGroupsInAvailable(plan.Must.VisualTagGroups, req.AvailableTags)
 	plan.Must = ensureMustArrays(plan.Must)
 
 	h.logger.Info("Smart search completed", map[string]interface{}{
@@ -129,7 +129,7 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 		"appVersion":          req.AppVersion,
 		"tagCount":            len(req.AvailableTags),
 		"searchKeywordGroups": plan.Must.SearchKeywordGroups,
-		"visualTagsAll":       plan.Must.VisualTagsAll,
+		"visualTagGroups":     plan.Must.VisualTagGroups,
 		"sensitive":           plan.Must.SensitiveTypes,
 		"count":               plan.Count,
 	})

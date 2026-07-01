@@ -13,7 +13,7 @@ enum SearchEngine {
 
         let must = plan.must ?? SearchMust()
         let keywordGroups = normalizedKeywordGroups(must.searchKeywordGroups ?? [])
-        let visualTags = must.visualTagsAll ?? []
+        let visualTagGroups = normalizedKeywordGroups(must.visualTagGroups ?? [])
         let sensitiveTypes = must.sensitiveTypes ?? []
 
         var ids: Set<String>?
@@ -22,9 +22,9 @@ enum SearchEngine {
             ids = matchKeywordGroups(keywordGroups, entries: entries, indexedIDs: indexedIDs)
         }
 
-        if !visualTags.isEmpty || !sensitiveTypes.isEmpty {
+        if !visualTagGroups.isEmpty || !sensitiveTypes.isEmpty {
             let visualIDs = intersectGroups(
-                visualTags: visualTags,
+                visualTagGroups: visualTagGroups,
                 sensitiveTypes: sensitiveTypes,
                 indexedIDs: indexedIDs,
                 tagPostings: tagPostings,
@@ -84,8 +84,9 @@ enum SearchEngine {
         return matched
     }
 
+    /// 视觉 tag 组：组内并集（OR，同义词由服务端展开），组间交集（AND）；敏感类型组间交集
     private static func intersectGroups(
-        visualTags: [String],
+        visualTagGroups: [[String]],
         sensitiveTypes: [String],
         indexedIDs: Set<String>,
         tagPostings: [String: Set<String>],
@@ -93,9 +94,14 @@ enum SearchEngine {
     ) -> Set<String> {
         var result: Set<String>?
 
-        for tag in visualTags {
-            let group = unionPostingIDs(for: tag, postings: tagPostings)
-            result = result.map { $0.intersection(group) } ?? group
+        for group in visualTagGroups {
+            var groupIDs = Set<String>()
+            for tag in group {
+                if let set = tagPostings[tag] {
+                    groupIDs.formUnion(set)
+                }
+            }
+            result = result.map { $0.intersection(groupIDs) } ?? groupIDs
         }
         for type in sensitiveTypes {
             let group = sensitivePostings[type] ?? []
@@ -104,19 +110,6 @@ enum SearchEngine {
 
         let base = result ?? []
         return base.intersection(indexedIDs)
-    }
-
-    private static func unionPostingIDs(
-        for tag: String,
-        postings: [String: Set<String>]
-    ) -> Set<String> {
-        var ids = Set<String>()
-        for synonym in VisualSynonyms.expand(tag) {
-            if let set = postings[synonym] {
-                ids.formUnion(set)
-            }
-        }
-        return ids
     }
 
     private static func passesFilters(

@@ -27,9 +27,25 @@ DEFAULT_SECRET = "4154b54de82723ca38aec922b3f6a7dfc104fde9"
 
 # 模拟本机 visualTags 词表（含下划线复合 tag）
 SAMPLE_TAGS = [
-    "person", "people", "human", "beach", "ocean", "sea",
-    "car", "vehicle", "automobile", "food", "cat", "kitten",
-    "document", "clothing", "red_clothing", "gray_clothing", "white",
+    # 人物
+    "person", "people", "human", "baby", "child", "group",
+    "selfie", "portrait", "man", "woman",
+    # 服饰/颜色
+    "clothing", "red_clothing", "gray_clothing", "blue_clothing",
+    "white", "hat", "glasses", "sunglasses",
+    # 动物
+    "cat", "kitten", "dog", "puppy", "bird", "fish",
+    # 自然/风景
+    "beach", "ocean", "sea", "mountain", "sky", "cloud",
+    "sunset", "snow", "tree", "plant", "flower", "water",
+    "night", "city", "building",
+    # 交通
+    "car", "vehicle", "automobile", "boat", "airplane",
+    "train", "bicycle",
+    # 食物/饮品
+    "food", "cake", "coffee", "tea", "drink", "fruit", "dessert",
+    # 物品/场景
+    "document", "book", "computer", "phone", "screen", "receipt",
 ]
 
 VALID_SENSITIVE_TYPES = {"id_card", "bank_card", "passport", "document"}
@@ -49,6 +65,7 @@ DEPRECATED_TOP_LEVEL = (
     "maxSizeMB",
     "sensitiveTypes",
     "visualTagsAll",
+    "visualTagGroups",
     "ocrContainsAll",
 )
 
@@ -108,6 +125,15 @@ def as_list(obj: Optional[dict], key: str) -> list:
     return value if isinstance(value, list) else []
 
 
+def flat_visual_tags(must: Optional[dict]) -> list[str]:
+    """把二维 visualTagGroups 拍平成一维 tag 列表。"""
+    tags: list[str] = []
+    for group in as_list(must, "visualTagGroups"):
+        if isinstance(group, list):
+            tags.extend(t for t in group if isinstance(t, str))
+    return tags
+
+
 def assert_search_plan(
     result: dict,
     available_tags: list[str],
@@ -125,7 +151,7 @@ def assert_search_plan(
         return errors
 
     must = result["must"]
-    for key in ("visualTagsAll", "sensitiveTypes", "ocrContainsAll"):
+    for key in ("visualTagGroups", "sensitiveTypes", "ocrContainsAll"):
         if key not in must:
             errors.append(f"must.{key} missing")
         elif must[key] is None:
@@ -159,11 +185,15 @@ def assert_search_plan(
                 errors.append(f"unknown filters keys: {sorted(unknown)}")
 
     allowed = set(available_tags)
-    for tag in as_list(must, "visualTagsAll"):
-        if not isinstance(tag, str):
-            errors.append(f"visualTagsAll item not string: {tag!r}")
-        elif tag not in allowed:
-            errors.append(f"visualTagsAll tag not in availableTags: {tag!r}")
+    for group in as_list(must, "visualTagGroups"):
+        if not isinstance(group, list) or not group:
+            errors.append(f"visualTagGroups group must be non-empty array: {group!r}")
+            continue
+        for tag in group:
+            if not isinstance(tag, str):
+                errors.append(f"visualTagGroups item not string: {tag!r}")
+            elif tag not in allowed:
+                errors.append(f"visualTagGroups tag not in availableTags: {tag!r}")
 
     for st in as_list(must, "sensitiveTypes"):
         if st not in VALID_SENSITIVE_TYPES:
@@ -190,10 +220,10 @@ def check_visual_tags_subset_of(*allowed: str) -> Callable[[dict, list[str]], Op
     allowed_set = set(allowed)
 
     def _check(result: dict, _tags: list[str]) -> Optional[str]:
-        got = as_list(result.get("must"), "visualTagsAll")
+        got = flat_visual_tags(result.get("must"))
         extra = [t for t in got if t not in allowed_set]
         if extra:
-            return f"unexpected visualTagsAll {extra}, expected subset of {sorted(allowed_set)}"
+            return f"unexpected visualTagGroups {extra}, expected subset of {sorted(allowed_set)}"
         return None
 
     return _check
@@ -210,11 +240,61 @@ def check_has_filter(*keys: str) -> Callable[[dict, list[str]], Optional[str]]:
     return _check
 
 
+def check_filter_contains(key: str, *expected: str) -> Callable[[dict, list[str]], Optional[str]]:
+    """filters[key] 是数组时，至少命中 expected 之一。"""
+
+    def _check(result: dict, _tags: list[str]) -> Optional[str]:
+        filters = result.get("filters") or {}
+        got = filters.get(key)
+        if got is None:
+            return f"expected filters.{key} to be set"
+        values = got if isinstance(got, list) else [got]
+        if any(e in values for e in expected):
+            return None
+        return f"expected filters.{key} to contain one of {list(expected)}, got {got}"
+
+    return _check
+
+
+def check_no_visual_tags() -> Callable[[dict, list[str]], Optional[str]]:
+    def _check(result: dict, _tags: list[str]) -> Optional[str]:
+        got = flat_visual_tags(result.get("must"))
+        return f"expected no visualTagGroups, got {got}" if got else None
+
+    return _check
+
+
+def check_has_visual_tags() -> Callable[[dict, list[str]], Optional[str]]:
+    def _check(result: dict, _tags: list[str]) -> Optional[str]:
+        return None if flat_visual_tags(result.get("must")) else "expected non-empty visualTagGroups"
+
+    return _check
+
+
+def check_visual_group_count(minimum: int) -> Callable[[dict, list[str]], Optional[str]]:
+    """至少有 minimum 个独立 visualTagGroups 分组（AND 语义）。"""
+
+    def _check(result: dict, _tags: list[str]) -> Optional[str]:
+        groups = as_list(result.get("must"), "visualTagGroups")
+        if len(groups) < minimum:
+            return f"expected >= {minimum} visualTagGroups, got {len(groups)}"
+        return None
+
+    return _check
+
+
+def check_has_ocr() -> Callable[[dict, list[str]], Optional[str]]:
+    def _check(result: dict, _tags: list[str]) -> Optional[str]:
+        return None if as_list(result.get("must"), "ocrContainsAll") else "expected non-empty ocrContainsAll"
+
+    return _check
+
+
 def print_plan(result: dict, verbose: bool) -> None:
     must = result.get("must", {})
     filters = result.get("filters") or {}
     print(f"  summary: {result.get('summary')}")
-    print(f"  must.visualTagsAll: {must.get('visualTagsAll')}")
+    print(f"  must.visualTagGroups: {must.get('visualTagGroups')}")
     print(f"  must.sensitiveTypes: {must.get('sensitiveTypes')}")
     print(f"  must.ocrContainsAll: {must.get('ocrContainsAll')}")
     if filters:
@@ -305,7 +385,7 @@ def test_request_validation(base_url: str, secret: str) -> bool:
 
 
 def test_empty_available_tags(base_url: str, secret: str) -> bool:
-    """availableTags: [] 合法，应 200 且 visualTagsAll 只能为空"""
+    """availableTags: [] 合法，应 200 且 visualTagGroups 只能为空"""
     print("\n" + "=" * 50)
     print("availableTags 空数组")
     print("=" * 50)
@@ -318,11 +398,11 @@ def test_empty_available_tags(base_url: str, secret: str) -> bool:
             print(resp.text)
             return False
         result = resp.json()
-        tags = as_list(result.get("must"), "visualTagsAll")
+        tags = flat_visual_tags(result.get("must"))
         if tags:
-            print(f"❌ 空词表时不应有 visualTagsAll: {tags}")
+            print(f"❌ 空词表时不应有 visualTagGroups: {tags}")
             return False
-        print("OK — visualTagsAll 为空")
+        print("OK — visualTagGroups 为空")
         return True
     except Exception as exc:
         print(f"错误: {exc}")
@@ -368,32 +448,109 @@ def test_smart_search(
 
 
 DEFAULT_SEARCH_CASES = [
+    # ── filters：日期 ──────────────────────────────
     SearchCase(
         "找几张去年去海南玩的照片",
         checks=[check_has_filter("dateRange")],
     ),
     SearchCase(
+        "今年拍的照片",
+        checks=[check_has_filter("dateRange")],
+    ),
+    SearchCase(
+        "上个月的照片",
+        checks=[check_has_filter("dateRange")],
+    ),
+    SearchCase(
+        "2023年春节的照片",
+        checks=[check_has_filter("dateRange")],
+    ),
+    # ── filters：媒体/资源类型 ─────────────────────
+    SearchCase(
+        "找大于5M的视频",
+        checks=[check_filter_contains("mediaTypes", "video"), check_has_filter("minSizeMB")],
+    ),
+    SearchCase(
+        "所有截图",
+        checks=[check_filter_contains("assetTypes", "screenshot")],
+    ),
+    SearchCase(
+        "录屏视频",
+        checks=[check_filter_contains("assetTypes", "screen_recording")],
+    ),
+    SearchCase(
+        "找我拍的 live 照片",
+        checks=[check_filter_contains("assetTypes", "live")],
+    ),
+    SearchCase(
+        "小于1M的图片",
+        checks=[check_filter_contains("mediaTypes", "image"), check_has_filter("maxSizeMB")],
+    ),
+    SearchCase(
+        "把所有视频找出来",
+        checks=[check_filter_contains("mediaTypes", "video")],
+    ),
+    # ── filters：位置 ──────────────────────────────
+    SearchCase(
+        "有定位信息的照片",
+        checks=[check_has_filter("hasLocation")],
+    ),
+    # ── 敏感类型 ───────────────────────────────────
+    SearchCase(
+        "身份证照片",
+        checks=[check_sensitive("id_card"), check_no_visual_tags()],
+    ),
+    SearchCase(
+        "银行卡照片",
+        checks=[check_sensitive("bank_card"), check_no_visual_tags()],
+    ),
+    SearchCase(
+        "护照照片",
+        checks=[check_sensitive("passport"), check_no_visual_tags()],
+    ),
+    # ── 视觉：单一对象 ─────────────────────────────
+    SearchCase(
         "帮我看看上周拍的猫猫",
         checks=[check_visual_tags_subset_of("cat", "kitten")],
     ),
     SearchCase(
-        "身份证照片",
-        checks=[
-            check_sensitive("id_card"),
-            lambda r, _t: (
-                "visualTagsAll should be empty for 身份证"
-                if as_list(r.get("must"), "visualTagsAll")
-                else None
-            ),
-        ],
+        "有小狗的照片",
+        checks=[check_visual_tags_subset_of("dog", "puppy")],
+    ),
+    SearchCase(
+        "海边的照片",
+        checks=[check_visual_tags_subset_of("beach", "ocean", "sea", "water")],
+    ),
+    SearchCase(
+        "美食照片",
+        checks=[check_visual_tags_subset_of("food", "cake", "coffee", "tea", "drink", "fruit", "dessert")],
+    ),
+    SearchCase(
+        "汽车的照片",
+        checks=[check_visual_tags_subset_of("car", "vehicle", "automobile")],
+    ),
+    SearchCase(
+        "我的自拍",
+        checks=[check_visual_tags_subset_of("selfie", "portrait", "person", "people", "human")],
     ),
     SearchCase(
         "穿红衣服的人",
         checks=[check_visual_tags_subset_of("person", "people", "human", "red_clothing", "clothing")],
     ),
+    # ── 视觉：多分组组合（AND） ────────────────────
     SearchCase(
-        "找大于5M的视频",
-        checks=[check_has_filter("mediaTypes", "minSizeMB")],
+        "海边的美食",
+        checks=[check_visual_group_count(2)],
+    ),
+    # ── 组合：日期 + 视觉 ──────────────────────────
+    SearchCase(
+        "去年在海边拍的照片",
+        checks=[check_has_filter("dateRange"), check_has_visual_tags()],
+    ),
+    # ── OCR 文本 ───────────────────────────────────
+    SearchCase(
+        "包含发票的照片",
+        checks=[check_has_ocr()],
     ),
 ]
 

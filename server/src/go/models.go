@@ -24,33 +24,34 @@ type Filters struct {
 	HasLocation    *bool           `json:"hasLocation,omitempty"`
 }
 
-// MustMatch 检索条件：关键词组（描述匹配）或倒排 tag 交集
+// MustMatch 检索条件：关键词组（描述匹配）与倒排 tag 组
+// 关键词组 / 视觉 tag 组均为「组内 OR、组间 AND」；同义词由模型在组内展开
 type MustMatch struct {
 	SearchKeywordGroups [][]string `json:"searchKeywordGroups"`
-	VisualTagsAll         []string   `json:"visualTagsAll"`
-	SensitiveTypes        []string   `json:"sensitiveTypes"`
-	OcrContainsAll        []string   `json:"ocrContainsAll"`
+	VisualTagGroups     [][]string `json:"visualTagGroups"`
+	SensitiveTypes      []string   `json:"sensitiveTypes"`
+	OcrContainsAll      []string   `json:"ocrContainsAll"`
 }
 
 // MarshalJSON 保证空列表序列化为 [] 而非 null
 func (m MustMatch) MarshalJSON() ([]byte, error) {
 	type alias struct {
 		SearchKeywordGroups [][]string `json:"searchKeywordGroups"`
-		VisualTagsAll       []string   `json:"visualTagsAll"`
+		VisualTagGroups     [][]string `json:"visualTagGroups"`
 		SensitiveTypes      []string   `json:"sensitiveTypes"`
 		OcrContainsAll      []string   `json:"ocrContainsAll"`
 	}
 	a := alias{
 		SearchKeywordGroups: m.SearchKeywordGroups,
-		VisualTagsAll:       m.VisualTagsAll,
+		VisualTagGroups:     m.VisualTagGroups,
 		SensitiveTypes:      m.SensitiveTypes,
 		OcrContainsAll:      m.OcrContainsAll,
 	}
 	if a.SearchKeywordGroups == nil {
 		a.SearchKeywordGroups = [][]string{}
 	}
-	if a.VisualTagsAll == nil {
-		a.VisualTagsAll = []string{}
+	if a.VisualTagGroups == nil {
+		a.VisualTagGroups = [][]string{}
 	}
 	if a.SensitiveTypes == nil {
 		a.SensitiveTypes = []string{}

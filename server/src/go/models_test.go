@@ -10,8 +10,8 @@ func TestMustMatchMarshalJSONNoNull(t *testing.T) {
 	cases := []MustMatch{
 		{},
 		{SensitiveTypes: []string{"id_card"}},
-		{VisualTagsAll: []string{"cat"}},
-		{VisualTagsAll: []string{"beach", "person"}}, // sensitiveTypes/ocr nil
+		{VisualTagGroups: [][]string{{"cat"}}},
+		{VisualTagGroups: [][]string{{"beach", "sea"}, {"person"}}}, // sensitiveTypes/ocr nil
 	}
 	for i, m := range cases {
 		data, err := json.Marshal(m)

@@ -185,7 +185,7 @@ func topVisualTags(limit: Int = 1000) -> [String]  // 默认全量去重，最�
   },
   "mustMatch": {
     "sensitiveTypes": ["id_card"],
-    "visualTagsAll": [],
+    "visualTagGroups": [],
     "ocrContainsAll": []
   },
   "shouldMatch": {
@@ -210,7 +210,7 @@ func topVisualTags(limit: Int = 1000) -> [String]  // 默认全量去重，最�
 | v1 字段 | v2 映射 |
 |---------|---------|
 | `keywords` | `shouldMatch.visualTags` |
-| `visualConcepts[].matchAny` | `mustMatch.visualTagsAll` 中每组概念一组 AND 链；或拆成多 tag AND |
+| `visualConcepts[].matchAny` | `mustMatch.visualTagGroups` 中每组概念作为一个子数组（组内 OR），组间 AND |
 | `ocrKeywords` | `shouldMatch.ocrContains` |
 | `ocrRegexes` | `shouldMatch.ocrRegexes` |
 | `sensitiveTypes` | `mustMatch.sensitiveTypes` |
@@ -482,8 +482,8 @@ LLM 只返回 SearchPlan JSON，规则摘要：
 1. `summary` 必填，英文简短描述；
 2. `filters`：仅在有硬条件时填写；
 3. `mustMatch.sensitiveTypes`：证件类查询优先；
-4. 视觉类：`mustMatch.visualTagsAll` 表示 AND；单词粒度，禁止 `"white car"`；
-5. 颜色类：拆成独立词并带近义词（`white` → `white, light, gray, silver, pale`）；
+4. 视觉类：`mustMatch.visualTagGroups` 为二维数组，组内 OR（同义词）、组间 AND；单词粒度，禁止 `"white car"`；
+5. 颜色类：拆成独立词，**同义词由大模型放进同一子数组**（`white` → `["white","light","gray","silver","pale"]`）；
 6. `shouldMatch`：宽泛召回 + 排序加分；
 7. `availableTags` 若提供，优先从中选 tag，可补充同义词；
 8. `count` 默认 1000。
@@ -600,7 +600,7 @@ enum VisualSynonyms {
 score = 0
 foreach t in mustMatch.sensitiveTypes where entry.sensitiveTypes contains t:
     score += 100
-foreach t in mustMatch.visualTagsAll where VisualTagMatcher.matches(t, entry):
+foreach group in mustMatch.visualTagGroups where anyOf(group, t => VisualTagMatcher.matches(t, entry)):
     score += 50
 foreach t in mustMatch.ocrContainsAll where OCRMatcher.contains(t, entry):
     score += 50
@@ -667,7 +667,7 @@ if response.keywords != nil || response.visualConcepts != nil {
 }
 ```
 
-`SearchPlan.migrate` 将 `keywords` → `shouldMatch.visualTags`，`visualConcepts` → `mustMatch.visualTagsAll` 分组。
+`SearchPlan.migrate` 将 `keywords` → `shouldMatch.visualTags`，`visualConcepts` → `mustMatch.visualTagGroups` 分组。
 
 ### 12.2 索引兼容
 

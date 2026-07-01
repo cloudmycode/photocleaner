@@ -57,7 +57,7 @@ struct SearchFilters: Decodable {
 }
 
 struct SearchMust: Decodable {
-    var visualTagsAll: [String]?
+    var visualTagGroups: [[String]]?
     var sensitiveTypes: [String]?
     var ocrContainsAll: [String]?
     var searchKeywordGroups: [[String]]?
