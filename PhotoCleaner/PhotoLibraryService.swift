@@ -967,9 +967,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     private func refreshSearchIndexInBackground() {
         Task {
             await SearchIndexRunCoordinator.shared.start(force: false) {
-#if DEBUG
-                SearchOCRDebugLog.info("background index task started")
-#endif
                 let imageAssets = Self.fetchImageAssets()
                 let videoAssets = Self.fetchVideoAssets()
                 try? await PhotoSearchIndexStore.shared.rebuildMetadata(
@@ -1016,12 +1013,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     }
 
     nonisolated private static func indexSearchImagesIfNeeded(for assets: [PHAsset]) async {
-#if DEBUG
-        let summary = await PhotoSearchIndexStore.shared.ocrIndexDebugSummary(for: assets)
-        SearchOCRDebugLog.info(
-            "stats \(summary) langs=\(SearchOCRSettings.recognitionLanguages().joined(separator: ","))"
-        )
-#endif
         let ocrPending = await PhotoSearchIndexStore.shared.assetsNeedingOCR(from: assets)
         let visualPending = await PhotoSearchIndexStore.shared.imageAssetsNeedingVisualIndex(from: assets)
         let pendingIDs = Set((ocrPending + visualPending).map(\.localIdentifier))
@@ -1030,29 +1021,14 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             .sorted {
                 ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast)
             }
-#if DEBUG
-        SearchOCRDebugLog.info(
-            "start pending=\(pending.count) probe=\(SearchOCRSettings.maxImageProbeEdge) ocrEdge=\(SearchOCRSettings.maxImageEdge) workers=\(SearchOCRSettings.indexConcurrency)"
-        )
-#endif
         guard !pending.isEmpty else {
             let enrichOnly = await PhotoSearchIndexStore.shared.assetsNeedingTagEnrichment(from: assets)
             guard !enrichOnly.isEmpty else { return }
-#if DEBUG
-            SearchOCRDebugLog.logEnrichPhaseStart(pending: enrichOnly.count)
-#endif
             await indexTagEnrichmentPass(for: enrichOnly)
             return
         }
 
-        let visualStarted = CFAbsoluteTimeGetCurrent()
         let ocrQueue = await indexVisualTagsPass(for: pending)
-#if DEBUG
-        let visualSeconds = CFAbsoluteTimeGetCurrent() - visualStarted
-        SearchOCRDebugLog.info(
-            "phase1 visual done \(pending.count - ocrQueue.count)/\(pending.count) skip, ocrQueue=\(ocrQueue.count) (\(String(format: "%.1f", visualSeconds))s)"
-        )
-#endif
         guard !ocrQueue.isEmpty else {
             let enrichOnly = await PhotoSearchIndexStore.shared.assetsNeedingTagEnrichment(from: assets)
             guard !enrichOnly.isEmpty else { return }
@@ -1060,27 +1036,12 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             return
         }
 
-        let ocrStarted = CFAbsoluteTimeGetCurrent()
         await indexOCRPass(for: ocrQueue)
-#if DEBUG
-        let ocrSeconds = CFAbsoluteTimeGetCurrent() - ocrStarted
-        SearchOCRDebugLog.info(
-            "phase2 ocr done \(ocrQueue.count)/\(ocrQueue.count) (\(String(format: "%.1f", ocrSeconds))s)"
-        )
-#endif
 
         let enrichPending = await PhotoSearchIndexStore.shared.assetsNeedingTagEnrichment(from: assets)
         guard !enrichPending.isEmpty else { return }
 
-#if DEBUG
-        SearchOCRDebugLog.logEnrichPhaseStart(pending: enrichPending.count)
-#endif
-        let enrichStarted = CFAbsoluteTimeGetCurrent()
         await indexTagEnrichmentPass(for: enrichPending)
-#if DEBUG
-        let enrichSeconds = CFAbsoluteTimeGetCurrent() - enrichStarted
-        SearchOCRDebugLog.logEnrichPhaseDone(total: enrichPending.count, seconds: enrichSeconds)
-#endif
     }
 
     /// 阶段 1：384px 分类 + 视觉 tag；~84% 直接跳过 OCR
@@ -1164,7 +1125,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         var batch: [(asset: PHAsset, text: String)] = []
         batch.reserveCapacity(12)
         let batchLock = NSLock()
-        var completed = 0
 
         await withTaskGroup(of: (asset: PHAsset, text: String, index: Int).self) { group in
             var nextIndex = 0
@@ -1192,7 +1152,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
 
                 batchLock.lock()
                 batch.append((result.asset, result.text))
-                completed += 1
                 let shouldFlush = batch.count >= 12
                 let flushBatch = shouldFlush ? batch : nil
                 if shouldFlush {
@@ -1217,9 +1176,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         let remaining = batch
         batchLock.unlock()
         try? await PhotoSearchIndexStore.shared.updateOCRTexts(remaining.map { ($0.asset, $0.text) })
-#if DEBUG
-        SearchOCRDebugLog.info("finished ocr \(completed)/\(assets.count)")
-#endif
     }
 
     nonisolated private static func scanVisualTags(for asset: PHAsset) async -> (needsOCR: Bool, visualTags: [String]) {
@@ -1288,66 +1244,28 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     nonisolated private static func indexTagEnrichmentPass(for assets: [PHAsset]) async {
         let batchSize = 8
         var index = 0
-        var batchNumber = 0
         while index < assets.count {
             guard !Task.isCancelled else { return }
             let end = min(index + batchSize, assets.count)
             let batch = Array(assets[index..<end])
             index = end
-            batchNumber += 1
 
             let payloads = await enrichmentPayloads(for: batch)
             guard !payloads.isEmpty else {
-#if DEBUG
-                SearchOCRDebugLog.info("[TagEnrich] batch \(batchNumber) skip empty payloads")
-#endif
                 continue
             }
 
-#if DEBUG
-            for payload in payloads {
-                if let asset = batch.first(where: { $0.localIdentifier == payload.assetId }) {
-                    SearchOCRDebugLog.logEnrichSubmit(asset: asset, ocrSnippet: payload.ocrSnippet)
-                }
-            }
-            SearchOCRDebugLog.logEnrichBatchRequest(
-                batch: batchNumber,
-                count: payloads.count,
-                assetIds: payloads.map(\.assetId)
-            )
-#endif
-            let started = CFAbsoluteTimeGetCurrent()
-
             do {
                 let results = try await TagEnrichmentClient.enrich(payloads: payloads)
-#if DEBUG
-                let durationMs = Int((CFAbsoluteTimeGetCurrent() - started) * 1000)
-                SearchOCRDebugLog.logEnrichBatchSuccess(
-                    batch: batchNumber,
-                    count: results.count,
-                    durationMs: durationMs
-                )
-#endif
                 let updates = results.compactMap { result -> (PHAsset, [String], [String], String)? in
                     guard let asset = batch.first(where: { $0.localIdentifier == result.assetId }) else {
                         return nil
                     }
-#if DEBUG
-                    SearchOCRDebugLog.logEnrichResult(
-                        asset: asset,
-                        enrichedTags: result.enrichedTags,
-                        sensitiveTypes: result.sensitiveTypes,
-                        searchDescription: result.searchDescription ?? ""
-                    )
-#endif
                     let description = result.searchDescription ?? ""
                     return (asset, result.enrichedTags, result.sensitiveTypes, description)
                 }
                 try? await PhotoSearchIndexStore.shared.updateEnrichedAnalyses(updates)
             } catch {
-#if DEBUG
-                SearchOCRDebugLog.logEnrichBatchFailed(batch: batchNumber, error: String(describing: error))
-#endif
                 await applyLocalEnrichmentFallback(for: batch)
             }
         }
@@ -1377,9 +1295,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     }
 
     nonisolated private static func applyLocalEnrichmentFallback(for assets: [PHAsset]) async {
-#if DEBUG
-        SearchOCRDebugLog.logEnrichFallback(count: assets.count)
-#endif
         let entries = await PhotoSearchIndexStore.shared.validEntries(for: assets)
         var updates: [(PHAsset, [String])] = []
         updates.reserveCapacity(assets.count)
@@ -1413,35 +1328,18 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         ) ?? ""
 
         let ocrText: String
-        let ocrMode: String
         if SearchOCRSettings.shouldRefineWithAccurate(fastText: fastText) {
             ocrText = recognizeText(
                 cgImage: payload.cgImage,
                 orientation: payload.orientation,
                 level: .accurate
             ) ?? fastText
-            ocrMode = "fast+accurate"
         } else if SearchOCRSettings.isUsefulSearchableOCR(fastText) {
             ocrText = fastText
-            ocrMode = "fast"
         } else {
             ocrText = ""
-            ocrMode = "skip-garbage"
         }
 
-#if DEBUG
-        let entries = await PhotoSearchIndexStore.shared.validEntries(for: [asset])
-        let visualTags = entries[asset.localIdentifier]?.visualTags ?? []
-        logSearchScanResult(
-            index: index,
-            total: total,
-            asset: asset,
-            ocrText: ocrText,
-            visualTags: visualTags,
-            imageLoaded: true,
-            ocrMode: ocrMode
-        )
-#endif
         return ocrText
     }
 
@@ -1457,35 +1355,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         let ocrText = await recognizeSearchOCR(for: asset, index: index, total: total)
         return (ocrText, scan.visualTags)
     }
-
-#if DEBUG
-    nonisolated private static func logSearchScanResult(
-        index: Int,
-        total: Int,
-        asset: PHAsset,
-        ocrText: String,
-        visualTags: [String],
-        imageLoaded: Bool,
-        ocrMode: String
-    ) {
-        let sensitive = SensitiveTypeDetector.detect(ocrText: ocrText, visualTags: visualTags)
-        let fields = sensitive.contains("id_card")
-            ? IDCardFieldExtractor.extract(from: ocrText)
-            : IDCardFieldExtractor.Fields()
-        SearchOCRDebugLog.logScanResult(
-            index: index,
-            total: total,
-            asset: asset,
-            ocrText: ocrText,
-            visualTagCount: visualTags.count,
-            sensitiveTypes: sensitive,
-            idCardName: fields.name,
-            idCardNumber: fields.number,
-            imageLoaded: imageLoaded,
-            ocrMode: ocrMode
-        )
-    }
-#endif
 
     private struct SearchOCRImagePayload {
         let cgImage: CGImage
@@ -1521,13 +1390,6 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 let degraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
                 if cancelled || info?[PHImageErrorKey] != nil {
                     resumed = true
-#if DEBUG
-                    let name = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "?"
-                    let err = info?[PHImageErrorKey]
-                    SearchOCRDebugLog.info(
-                        "image load fail \(name) cancelled=\(cancelled) error=\(String(describing: err))"
-                    )
-#endif
                     continuation.resume(returning: nil)
                     return
                 }

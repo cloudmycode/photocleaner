@@ -18,7 +18,6 @@
 		AA000000000000000000000A /* SensitiveTypeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001E /* SensitiveTypeDetector.swift */; };
 		AA000000000000000000000B /* IDCardFieldExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000001F /* IDCardFieldExtractor.swift */; };
 		AA000000000000000000000C /* SmartSearchQueryParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000021 /* SmartSearchQueryParser.swift */; };
-		AA000000000000000000000D /* SearchOCRDebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* SearchOCRDebugLog.swift */; };
 		AA000000000000000000000E /* SearchOCRSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000023 /* SearchOCRSettings.swift */; };
 /* End PBXBuildFile section */
 
@@ -38,7 +37,6 @@
 		AA000000000000000000001E /* SensitiveTypeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveTypeDetector.swift; sourceTree = "<group>"; };
 		AA000000000000000000001F /* IDCardFieldExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IDCardFieldExtractor.swift; sourceTree = "<group>"; };
 		AA0000000000000000000021 /* SmartSearchQueryParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartSearchQueryParser.swift; sourceTree = "<group>"; };
-		AA0000000000000000000022 /* SearchOCRDebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOCRDebugLog.swift; sourceTree = "<group>"; };
 		AA0000000000000000000023 /* SearchOCRSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOCRSettings.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -74,7 +72,6 @@
 				AA000000000000000000001E /* SensitiveTypeDetector.swift */,
 				AA000000000000000000001F /* IDCardFieldExtractor.swift */,
 				AA0000000000000000000021 /* SmartSearchQueryParser.swift */,
-				AA0000000000000000000022 /* SearchOCRDebugLog.swift */,
 				AA0000000000000000000023 /* SearchOCRSettings.swift */,
 				AA0000000000000000000013 /* Info.plist */,
 				AA0000000000000000000043 /* Resources */,
@@ -180,7 +177,6 @@
 				AA000000000000000000000A /* SensitiveTypeDetector.swift in Sources */,
 				AA000000000000000000000B /* IDCardFieldExtractor.swift in Sources */,
 				AA000000000000000000000C /* SmartSearchQueryParser.swift in Sources */,
-				AA000000000000000000000D /* SearchOCRDebugLog.swift in Sources */,
 				AA000000000000000000000E /* SearchOCRSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -237,7 +233,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = YES;
+				ENABLE_TESTABILITY = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;

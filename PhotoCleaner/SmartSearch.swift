@@ -108,26 +108,11 @@ enum SmartSearchClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw SmartSearchError.network }
-#if DEBUG
-        logResponse(data: data, statusCode: http.statusCode)
-#endif
         if http.statusCode == 401 { throw SmartSearchError.unauthorized }
         guard (200..<300).contains(http.statusCode) else { throw SmartSearchError.network }
 
         return try JSONDecoder().decode(SearchPlan.self, from: data)
     }
-
-#if DEBUG
-    private static func logResponse(data: Data, statusCode: Int) {
-        if let object = try? JSONSerialization.jsonObject(with: data),
-           let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-           let text = String(data: pretty, encoding: .utf8) {
-            print("[SmartSearch] response (\(statusCode)):\n\(text)")
-        } else if let raw = String(data: data, encoding: .utf8) {
-            print("[SmartSearch] response (\(statusCode)): \(raw)")
-        }
-    }
-#endif
 
     private struct RequestBody: Encodable {
         let query: String
@@ -185,18 +170,8 @@ enum TagEnrichmentClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw SmartSearchError.network }
-#if DEBUG
-        if !(200..<300).contains(http.statusCode) {
-            print("[TagEnrich] HTTP \(http.statusCode) url=\(url.absoluteString)")
-        }
-#endif
         if http.statusCode == 401 { throw SmartSearchError.unauthorized }
         guard (200..<300).contains(http.statusCode) else {
-#if DEBUG
-            if let url = SmartSearchConfig.enrichEndpoint {
-                print("[TagEnrich] HTTP \(http.statusCode) url=\(url.absoluteString)")
-            }
-#endif
             throw SmartSearchError.network
         }
 
@@ -228,18 +203,10 @@ enum SmartSearchService {
     static func search(query: String) async throws -> [PHAsset] {
         let store = PhotoSearchIndexStore.shared
         let availableTags = await store.topVisualTags(limit: SmartSearchClient.availableTagsLimit)
-#if DEBUG
-        print("[SmartSearch] availableTags (\(availableTags.count))")
-#endif
         let plan = SmartSearchQueryParser.enrichPlan(
             try await SmartSearchClient.fetchPlan(query: query, availableTags: availableTags),
             originalQuery: query
         )
-#if DEBUG
-        if let groups = plan.must?.searchKeywordGroups, !groups.isEmpty {
-            print("[SmartSearch] searchKeywordGroups: \(groups)")
-        }
-#endif
         let index = await store.searchIndex()
 
         let options = PHFetchOptions()
@@ -255,9 +222,6 @@ enum SmartSearchService {
             tagPostings: index.tagPostings,
             sensitivePostings: index.sensitivePostings
         )
-#if DEBUG
-        print("[SmartSearch] matched \(matched.count) / \(entries.count) indexed")
-#endif
         let matchedIDs = Set(matched.map(\.id))
         return assets.filter { matchedIDs.contains($0.localIdentifier) }
     }

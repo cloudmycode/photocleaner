@@ -161,24 +161,6 @@ actor PhotoSearchIndexStore {
         }
     }
 
-#if DEBUG
-    func ocrIndexDebugSummary(for assets: [PHAsset]) -> String {
-        loadIfNeeded()
-        let existing = entries ?? [:]
-        var pending = 0
-        var goodOCR = 0
-        for asset in assets where asset.mediaType == .image {
-            let entry = existing[asset.localIdentifier]
-            if entry?.ocrIndexedAt == nil {
-                pending += 1
-            } else if (entry?.ocrText ?? "").count > 50 {
-                goodOCR += 1
-            }
-        }
-        return "pending=\(pending) goodOCR=\(goodOCR) totalImages=\(assets.count)"
-    }
-#endif
-
     func updateOCRText(_ text: String, for asset: PHAsset) throws {
         loadIfNeeded()
         upsertOCRText(text, for: asset)
@@ -595,13 +577,6 @@ actor PhotoSearchIndexStore {
         }
         applyIDCardFields(to: &entry)
         entries?[id] = entry
-#if DEBUG
-        if sensitive.contains("id_card") {
-            SearchOCRDebugLog.info(
-                "indexed id_card | \(SearchOCRDebugLog.assetLabel(asset)) | name=\(entry.idCardName ?? "-") | idNo=\(entry.idCardNumber ?? "-")"
-            )
-        }
-#endif
     }
 
     private static func mergedVisualTags(previous: [String], enriched: [String]) -> [String] {
