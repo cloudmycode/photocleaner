@@ -1,72 +1,50 @@
 package main
 
-// LLM 提示词模板（SearchPlan：filters + must）
+// LLM 提示词模板（SearchPlan：filters + tagGroups + textGroups）
 const PromptTemplate = `Parse photo search intent. Return only JSON, no Markdown.
 
 Query: {query}
 Locale: {locale}
 Today: {current_date}
-Device tags (ONLY for visualTagGroups; max 1000): {available_tags}
+Available indexed tags (ONLY use these exact strings in tagGroups): {available_tags}
 
-Schema:
+Schema (output a filters object whenever the Query implies any metadata condition; keep only the keys that apply and drop the rest):
 {
   "summary": "",
-  "filters": { ... },
+  "filters": {
+    "dateRange": { "start": "yyyy-MM-dd", "end": "yyyy-MM-dd" },
+    "locationBounds": [ { "name": "", "minLatitude": 0, "maxLatitude": 0, "minLongitude": 0, "maxLongitude": 0 } ],
+    "mediaTypes": ["image"],
+    "assetTypes": ["screenshot"],
+    "minSizeMB": 0,
+    "maxSizeMB": 0,
+    "hasLocation": true
+  },
   "must": {
-    "searchKeywordGroups": [],
-    "visualTagGroups": [],
-    "sensitiveTypes": [],
-    "ocrContainsAll": []
+    "tagGroups": [],
+    "textGroups": []
   },
   "count": 1000,
   "confidence": 0.8
 }
 
 Rules:
-- summary: short, in the user's language, describing ONLY what the user asked. Never invent colors/clothing/scenes the user did not mention.
-- must: always include all four arrays ([] if unused).
+- Query may be written in ANY language. Reason about the meaning/intent, then apply the same logic regardless of language.
+- Locale is only a weak hint. If Query language conflicts with Locale, trust the Query itself.
+- summary: short, in the user's language, describing ONLY what the user asked.
 
-STEP 1 — FILTERS (extract metadata FIRST; these words must NOT appear in must):
-  Scan the whole query and pull out EVERY time / size / media-type / screenshot / location word, even when content words also exist.
-  - dateRange {start,end} (yyyy-MM-dd), resolved against Today={current_date}:
-    今年→<year>-01-01..12-31; 去年→prev full year; 上个月→prev month first..last; 上周→prev Mon..Sun; 最近三天→(Today-2)..Today.
-  - mediaTypes: 照片/图片→["image"]; 视频/录像→["video"].
-  - assetTypes: 截图/截屏→"screenshot"; 实况→"live"; 录屏→"screen_recording".
-  - minSizeMB/maxSizeMB (MB): 大于5M→minSizeMB:5; 小于2M→maxSizeMB:2; 1G≈1024.
-  - hasLocation:true for 有定位/带位置; locationBounds for named places.
-  - Omit unused fields.
+FILTERS (hard metadata conditions; extract these FIRST, and do NOT repeat their words in textGroups):
+- Always output a "filters" object when the Query implies any time / media type / asset type / size / location condition. Include only the keys that apply.
+- dateRange: {start,end} as literal "yyyy-MM-dd" strings, always resolved to concrete calendar dates against Today={current_date}. NEVER output words like "last year"; compute the real dates. Covers this year, last year, this/last month, this/last week, last N days, a specific year or month, etc.
+- mediaTypes: a photo/image/picture concept -> ["image"]; a video/movie/clip concept -> ["video"].
+- assetTypes: a screenshot concept -> ["screenshot"]; a live photo concept -> ["live"]; a screen recording concept -> ["screen_recording"].
+- minSizeMB / maxSizeMB: "larger than N" -> minSizeMB:N; "smaller than N" -> maxSizeMB:N; convert GB to MB with 1GB≈1024MB.
+- hasLocation: true when the user wants photos that have GPS/location; locationBounds for a clearly named place.
 
-STEP 2 — CONTENT (only the words LEFT after filters; pick ONE primary path):
-
-A) searchKeywordGroups — DEFAULT for objects, devices, brands, accounts, passwords, documents, receipts, label text.
-   * Each inner array = ONE concept (its synonyms/translations); OR inside a group, AND across groups.
-   * A keyword is a SHORT content noun that could literally appear in a photo description. Drop wrapper words (找/帮我/看看/几张/想看/拍的/的照片) and keep only the core noun(s).
-   * Same meaning only: 卡车(truck)≠卡钳(caliper); never swap a word that just shares a character.
-   * Client does substring match on per-photo searchDescription.
-   * Examples:
-     - 路由器账号 → [["路由器","router","无线路由","wifi"],["账号","账户","account","登录"]]
-     - 汽车 → [["汽车","轿车","车辆","car","vehicle"]]
-     - 身份证 → sensitiveTypes["id_card"] + [["身份证","id card","证件"]]
-     - "找几张去年去海南玩的照片" → filters:{dateRange:去年}; searchKeywordGroups:[["海南","hainan"]]; visualTagGroups:[["beach","sea","ocean"]]
-   * If user quotes text/numbers, also add ocrContainsAll.
-
-B) visualTagGroups — ONLY for pure scene/appearance without specific text/object (海边, 红衣服, 猫, 狗).
-   * Each group = ONE concept; put EVERY matching Device tag into it (client does NO synonym expansion). Copy EXACT strings from Device tags; never invent one.
-   * A group holds strict synonyms only — never mix opposites: red group has no gray/white; cat group has no dog.
-   * Examples (assuming the strings exist in Device tags):
-     - 海边 → [["beach","sea","ocean","coast","shore"]]
-     - 猫 → [["cat","kitten","feline"]]
-     - 红衣服的人 → [["red","red_clothing"],["person","people","human"]]
-   * If no tag fits a concept, drop that group; if nothing fits, return []. Never fallback to person/clothing.
-
-C) sensitiveTypes — id_card|bank_card|passport|document for 证件/票据.
-
-KEY: A query FULLY covered by filters+visualTagGroups+sensitiveTypes MUST have searchKeywordGroups:[]. Examples:
-  - "找大于5M的视频" → filters only; both groups [].
-  - "穿红衣服的人" → visualTagGroups:[["red","red_clothing"],["person","people","human"]]; searchKeywordGroups:[].
-  - "帮我看看上周拍的猫猫" → filters:{dateRange:上周}; visualTagGroups:[["cat","kitten"]]; searchKeywordGroups:[].
-Use both searchKeywordGroups and visualTagGroups together ONLY when the user clearly combines a scene AND an object.
-
-WORDING (hard): keep the user's EXACT words. Never swap a color/noun for a different one (红≠灰, 猫≠狗); summary and tags must match the query, adding nothing.
-
-Omit empty fields.`
+- must: always include tagGroups and textGroups ([] if unused).
+- tagGroups: pick from Available indexed tags the tags most relevant to the query. For example, to find a "red car", select tags such as "red" and "car" that exist in the list. Copy exact tag strings only; never invent tags. If a concept is visual and matching tags exist, prefer tagGroups over textGroups.
+- textGroups: literal text keywords that may appear in the photo's OCR/search text (names, brands, accounts, numbers, codes, etc.). Copy person names and identifiers character-for-character from Query; never substitute, transliterate, or translate them.
+- Each inner group means OR. Different groups mean AND. Therefore, do NOT split one short noun phrase into multiple groups unless the user clearly requires multiple independent conditions.
+- For a short query or a single compact concept (for example "router password", "王洋", "ZXHN G7715V5", "猫"), prefer ONE group that keeps the original phrase or literals together.
+- count: how many photos the user wants to search for (default 1000).
+`

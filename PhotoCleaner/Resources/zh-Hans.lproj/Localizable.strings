@@ -19,6 +19,7 @@
 "items.count.format" = "%lld 项";
 "videos.count.format" = "%@ 个视频";
 "category.duplicates" = "重复照片";
+"category.bursts" = "连拍照片";
 "category.screenshots" = "屏幕截图";
 "category.live.photos" = "Live 照片瘦身";
 "category.low.quality" = "低质量照片";
@@ -93,6 +94,10 @@
 "settings.keep.original" = "压缩后保留原视频";
 "settings.general.security" = "通用与安全";
 "settings.language" = "语言";
+"settings.monthly.reminder" = "月度整理提醒";
+"settings.monthly.reminder.description" = "当上个月的照片可以开始整理时提醒我。";
+"settings.monthly.reminder.pending" = "开启后会请求本地通知权限。";
+"settings.monthly.reminder.denied" = "系统通知已关闭，请到系统设置中开启。";
 "settings.language.system" = "跟随系统";
 "settings.language.hint" = "更改语言后，界面将立即更新。";
 "settings.clear.cache" = "清理缓存空间";
@@ -126,6 +131,13 @@
 "duplicate.empty" = "未发现重复照片";
 "duplicate.empty.description" = "没有找到画面内容一致的照片副本。";
 "duplicate.analyzing.format" = "正在检查重复照片 %d/%d";
+"similar.group.resolved" = "已保留 1 张，其余照片已删除";
+"similar.group.kept.single" = "已保留 1 张";
+"burst.title" = "连拍照片";
+"burst.best.pick" = "已保留最佳";
+"burst.empty" = "未发现连拍照片";
+"burst.empty.description" = "没有找到连拍或短时间连续拍摄的照片组。";
+"burst.group.title.format" = "%@ · %d 张";
 "mark.for.deletion" = "标记删除";
 "month.marked.format" = "已标记 %d 张照片";
 "month.marked.description" = "完成检查后统一删除";
@@ -163,7 +175,10 @@
 "live.convert.confirm.title" = "移除 Live 动态效果？";
 "live.convert.confirm.message" = "将保留 %d 张静态照片，并把原 Live Photo 移至“最近删除”。";
 "live.convert.confirm.action" = "转为普通照片";
+"live.converted.status" = "已转为普通照片";
 "live.motion.size.format" = "动态 %@";
+"monthly.reminder.title" = "上个月的照片可以开始整理了";
+"monthly.reminder.body.format" = "%@ 的照片已经整理好时间线了，现在可以快速过一遍。";
 "tab.smart.search" = "智能找图";
 "smart.search.prompt" = "说出你想找的照片条件";
 "smart.search.placeholder" = "例如：找出去年去海南玩的图";

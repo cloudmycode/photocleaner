@@ -4,11 +4,11 @@ import "encoding/json"
 
 // SearchPlan 客户端本地检索计划（倒排交集 + filters）
 type SearchPlan struct {
-	Summary    string   `json:"summary"`
-	Filters    Filters  `json:"filters,omitempty"`
+	Summary    string    `json:"summary"`
+	Filters    Filters   `json:"filters,omitempty"`
 	Must       MustMatch `json:"must"`
-	Count      int      `json:"count"`
-	Confidence float64  `json:"confidence,omitempty"`
+	Count      int       `json:"count"`
+	Confidence float64   `json:"confidence,omitempty"`
 }
 
 // Filters 元数据硬条件（查正排档案，不走倒排）
@@ -24,40 +24,28 @@ type Filters struct {
 	HasLocation    *bool           `json:"hasLocation,omitempty"`
 }
 
-// MustMatch 检索条件：关键词组（描述匹配）与倒排 tag 组
-// 关键词组 / 视觉 tag 组均为「组内 OR、组间 AND」；同义词由模型在组内展开
+// MustMatch 检索条件：tag 组（模型从 availableTags 中选择）与文本组（模型抽取）
+// 两类组均为「组内 OR、组间 AND」。
 type MustMatch struct {
-	SearchKeywordGroups [][]string `json:"searchKeywordGroups"`
-	VisualTagGroups     [][]string `json:"visualTagGroups"`
-	SensitiveTypes      []string   `json:"sensitiveTypes"`
-	OcrContainsAll      []string   `json:"ocrContainsAll"`
+	TagGroups  [][]string `json:"tagGroups"`
+	TextGroups [][]string `json:"textGroups"`
 }
 
 // MarshalJSON 保证空列表序列化为 [] 而非 null
 func (m MustMatch) MarshalJSON() ([]byte, error) {
 	type alias struct {
-		SearchKeywordGroups [][]string `json:"searchKeywordGroups"`
-		VisualTagGroups     [][]string `json:"visualTagGroups"`
-		SensitiveTypes      []string   `json:"sensitiveTypes"`
-		OcrContainsAll      []string   `json:"ocrContainsAll"`
+		TagGroups  [][]string `json:"tagGroups"`
+		TextGroups [][]string `json:"textGroups"`
 	}
 	a := alias{
-		SearchKeywordGroups: m.SearchKeywordGroups,
-		VisualTagGroups:     m.VisualTagGroups,
-		SensitiveTypes:      m.SensitiveTypes,
-		OcrContainsAll:      m.OcrContainsAll,
+		TagGroups:  m.TagGroups,
+		TextGroups: m.TextGroups,
 	}
-	if a.SearchKeywordGroups == nil {
-		a.SearchKeywordGroups = [][]string{}
+	if a.TagGroups == nil {
+		a.TagGroups = [][]string{}
 	}
-	if a.VisualTagGroups == nil {
-		a.VisualTagGroups = [][]string{}
-	}
-	if a.SensitiveTypes == nil {
-		a.SensitiveTypes = []string{}
-	}
-	if a.OcrContainsAll == nil {
-		a.OcrContainsAll = []string{}
+	if a.TextGroups == nil {
+		a.TextGroups = [][]string{}
 	}
 	return json.Marshal(a)
 }
@@ -78,8 +66,8 @@ type LocationBound struct {
 }
 
 var validSensitiveTypes = map[string]struct{}{
-	"id_card":    {},
-	"bank_card":  {},
-	"passport":   {},
-	"document": {},
+	"id_card":   {},
+	"bank_card": {},
+	"passport":  {},
+	"document":  {},
 }

@@ -19,6 +19,7 @@
 "items.count.format" = "%lld 件";
 "videos.count.format" = "%@ 本の動画";
 "category.duplicates" = "重複写真";
+"category.bursts" = "連写写真";
 "category.screenshots" = "スクリーンショット";
 "category.live.photos" = "Live 写真の軽量化";
 "category.low.quality" = "低品質";
@@ -126,6 +127,13 @@
 "duplicate.empty" = "重複写真はありません";
 "duplicate.empty.description" = "同じ内容の写真コピーは見つかりませんでした。";
 "duplicate.analyzing.format" = "重複写真を確認中 %d/%d";
+"similar.group.resolved" = "1 枚を保持し、残りは削除しました";
+"similar.group.kept.single" = "1 枚を保持";
+"burst.title" = "連写写真";
+"burst.best.pick" = "ベストを保持";
+"burst.empty" = "連写写真はありません";
+"burst.empty.description" = "連写または短時間に連続撮影された写真グループは見つかりませんでした。";
+"burst.group.title.format" = "%@ · %d 枚";
 "mark.for.deletion" = "削除対象にする";
 "month.marked.format" = "%d 枚を削除対象に設定";
 "month.marked.description" = "確認後にまとめて削除します";
@@ -163,6 +171,7 @@
 "live.convert.confirm.title" = "Live の動きを削除しますか？";
 "live.convert.confirm.message" = "%d 枚の静止写真を保存し、元の Live Photo は「最近削除した項目」に移動します。";
 "live.convert.confirm.action" = "静止写真に変換";
+"live.converted.status" = "静止写真に変換済み";
 "live.motion.size.format" = "動画部分 %@";
 "tab.smart.search" = "スマート検索";
 "smart.search.prompt" = "探したい写真の条件を話してください";

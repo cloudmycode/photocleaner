@@ -3,8 +3,10 @@ import CoreLocation
 import Photos
 import PhotosUI
 import Speech
+import StoreKit
 import SwiftUI
 import UIKit
+import UserNotifications
 import Vision
 
 private func L(_ key: String) -> String {
@@ -166,6 +168,10 @@ struct QuickCleanView: View {
                 count: library.duplicateCandidateCount,
                 size: formattedStorage(library.duplicateCandidateStorageBytes)
             ),
+            CleanerCategory.bursts(
+                count: library.burstCandidateCount,
+                size: formattedStorage(library.burstCandidateStorageBytes)
+            ),
             CleanerCategory.screenshots(
                 count: library.screenshotCount,
                 size: formattedStorage(library.screenshotStorageBytes)
@@ -298,6 +304,16 @@ struct QuickCleanView: View {
         }
         .background(Color.cleanerBackground)
         .id(languageSettings.effectiveLocaleIdentifier)
+        .onAppear {
+            if library.hasCompletedInitialAnalysis {
+                library.loadBurstGroupsIfNeeded()
+            }
+        }
+        .onChange(of: library.hasCompletedInitialAnalysis) { _, completed in
+            if completed {
+                library.loadBurstGroupsIfNeeded()
+            }
+        }
         .overlay(alignment: .bottom) {
             if let toastMessage {
                 CleanerToast(message: toastMessage)
@@ -312,7 +328,9 @@ struct QuickCleanView: View {
     @ViewBuilder
     private func destination(for item: CleanerCategory) -> some View {
         if item.kind == .duplicate {
-            SimilarCleanView()
+            SimilarCleanView(mode: .duplicate)
+        } else if item.kind == .burst {
+            SimilarCleanView(mode: .burst)
         } else if item.kind == .livePhoto {
             LivePhotoCleanView(category: item)
         } else if item.kind.usesAssetGrid {
@@ -323,7 +341,7 @@ struct QuickCleanView: View {
     }
 
     private func loadingText(for item: CleanerCategory) -> String? {
-        guard !library.isUsingCachedHomeSummary else { return nil }
+        guard item.count == 0 else { return nil }
 
         if case .loadingLibrary = library.scanState {
             return L("library.reading")
@@ -338,6 +356,10 @@ struct QuickCleanView: View {
             )
         }
 
+        if item.kind == .burst, library.isLoadingBurstGroups {
+            return L("home.item.loading")
+        }
+
         return nil
     }
 
@@ -345,6 +367,8 @@ struct QuickCleanView: View {
         switch item.kind {
         case .duplicate:
             return library.hasDuplicateScanResults || library.duplicateScanProgress == nil
+        case .burst:
+            return item.count > 0 || !library.isLoadingBurstGroups
         default:
             return true
         }
@@ -1287,6 +1311,18 @@ private struct MonthAssetRow: View {
         library.monthlyReviewedCounts[group.id] ?? 0
     }
 
+    private var progressBar: some View {
+        Capsule()
+            .fill(Color.cleanerBorder.opacity(0.6))
+            .frame(width: 130, height: 3)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(progress >= 1 ? Color.cleanerGreen : Color.cleanerBlue)
+                    .frame(width: 130 * min(max(progress, 0), 1))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             if let first = group.assets.first {
@@ -1301,7 +1337,18 @@ private struct MonthAssetRow: View {
                 HStack {
                     Text(languageSettings.formatMonth(group.date))
                         .font(.subheadline.weight(.semibold))
-                    Spacer()
+                }
+                progressBar
+                HStack(spacing: 8) {
+                    Text(
+                        String.localizedStringWithFormat(
+                            L("items.count.format"),
+                            group.assets.count
+                        )
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
                     if progress >= 1 {
                         Label("month.progress.complete", systemImage: "checkmark")
                             .font(.caption2.bold())
@@ -1314,20 +1361,10 @@ private struct MonthAssetRow: View {
                                 group.assets.count
                             )
                         )
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                     }
                 }
-                ProgressView(value: progress)
-                    .tint(progress >= 1 ? .cleanerGreen : .cleanerBlue)
-                Text(
-                    String.localizedStringWithFormat(
-                        L("items.count.format"),
-                        group.assets.count
-                    )
-                )
-                .font(.caption2)
-                .foregroundStyle(.secondary)
             }
             Spacer()
             Text(formattedStorage(group.storageBytes))
@@ -1345,24 +1382,66 @@ private struct MonthAssetRow: View {
         .frame(minHeight: 88)
         .background(.white)
         .overlay(alignment: .bottom) {
-            Divider().padding(.leading, 92)
+            InsetRowSeparator(leadingInset: 92)
         }
     }
 }
 
+enum PhotoGroupCleanMode {
+    case duplicate
+    case burst
+}
+
 struct SimilarCleanView: View {
     @EnvironmentObject private var library: PhotoLibraryService
+    let mode: PhotoGroupCleanMode
     @State private var selectedIDs = Set<String>()
+    @State private var removedIDs = Set<String>()
     @State private var previewPhoto: IdentifiablePHAsset?
     @State private var deletionError: String?
     @State private var showDeleteConfirmation = false
 
     private var selectedCount: Int { selectedIDs.count }
-    private var expectedCandidateCount: Int { library.duplicateCandidateCount }
-    private var groups: [SimilarAssetGroup] { library.duplicateGroups }
+    private var expectedCandidateCount: Int {
+        switch mode {
+        case .duplicate:
+            return library.duplicateCandidateCount
+        case .burst:
+            return library.burstCandidateCount
+        }
+    }
+
+    private var rawGroups: [SimilarAssetGroup] {
+        switch mode {
+        case .duplicate:
+            return library.duplicateGroups
+        case .burst:
+            return library.burstGroups
+        }
+    }
+
+    // 过滤掉已删除照片对应的缩略图；若组内仅剩 1 张，则保留为“已处理”状态，
+    // 避免用户误以为整组照片都被删掉了。
+    private var groups: [SimilarAssetGroup] {
+        guard !removedIDs.isEmpty else { return rawGroups }
+        return rawGroups.compactMap { group in
+            let remaining = group.assets.filter { !removedIDs.contains($0.id) }
+            guard !remaining.isEmpty else { return nil }
+            if remaining.count == group.assets.count { return group }
+            return SimilarAssetGroup(
+                id: group.id,
+                assets: remaining,
+                creationDate: group.creationDate
+            )
+        }
+    }
 
     private var previewAssets: [PHAsset] {
         groups.flatMap(\.assets).map(\.asset)
+    }
+
+    private var firstSelectableGroupID: String? {
+        groups.first(where: { $0.assets.count >= 2 })?.id
     }
 
     var body: some View {
@@ -1370,10 +1449,10 @@ struct SimilarCleanView: View {
             VStack(spacing: 18) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("duplicate.title")
+                        Text(titleKey)
                             .font(.title2.bold())
                         Spacer()
-                        Text("duplicate.original.kept")
+                        Text(keptKey)
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
@@ -1382,9 +1461,9 @@ struct SimilarCleanView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("duplicate.title")
+                        Text(titleKey)
                             .font(.title2.bold())
-                        Text("duplicate.original.kept")
+                        Text(keptKey)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Color.cleanerGreen)
                     }
@@ -1479,7 +1558,7 @@ struct SimilarCleanView: View {
             .padding(.top, 60)
         default:
             if groups.isEmpty {
-                if expectedCandidateCount > 0 {
+                if mode == .burst, library.isLoadingBurstGroups {
                     VStack(spacing: 12) {
                         ProgressView()
                         Text(scanDescription)
@@ -1488,11 +1567,20 @@ struct SimilarCleanView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
-                } else if library.scanState == .finished || library.hasCompletedInitialAnalysis {
+                } else if expectedCandidateCount > 0 {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text(scanDescription)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
+                } else if mode == .burst || library.scanState == .finished || library.hasCompletedInitialAnalysis {
                     ContentUnavailableView(
-                        "duplicate.empty",
+                        emptyTitleKey,
                         systemImage: "checkmark.circle",
-                        description: Text("duplicate.empty.description")
+                        description: Text(emptyDescriptionKey)
                     )
                     .padding(.top, 60)
                 } else {
@@ -1513,7 +1601,10 @@ struct SimilarCleanView: View {
                             title: groupTitle(group, index: index),
                             group: group,
                             selectedIDs: $selectedIDs,
-                            previewPhoto: $previewPhoto
+                            previewPhoto: $previewPhoto,
+                            showSelectAll: group.id == firstSelectableGroupID,
+                            allSelected: allCandidatesSelected,
+                            onToggleSelectAll: toggleSelectAllGroups
                         )
                     }
                 }
@@ -1522,12 +1613,16 @@ struct SimilarCleanView: View {
     }
 
     private var scanDescription: String {
-        if let progress = library.duplicateScanProgress {
+        if mode == .duplicate,
+           let progress = library.duplicateScanProgress {
             return String.localizedStringWithFormat(
                 L("duplicate.analyzing.format"),
                 progress.current,
                 progress.total
             )
+        }
+        if mode == .burst, library.isLoadingBurstGroups {
+            return L("library.reading")
         }
         return L("library.reading")
     }
@@ -1539,7 +1634,35 @@ struct SimilarCleanView: View {
                 index + 1
             )
         }
+        if mode == .burst {
+            return String.localizedStringWithFormat(
+                L("burst.group.title.format"),
+                date.formatted(date: .abbreviated, time: .shortened),
+                group.assets.count
+            )
+        }
         return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var allCandidateIDs: Set<String> {
+        Set(
+            groups
+                .flatMap(\.assets)
+                .filter { !$0.isBest }
+                .map(\.id)
+        )
+    }
+
+    private var allCandidatesSelected: Bool {
+        !allCandidateIDs.isEmpty && allCandidateIDs.isSubset(of: selectedIDs)
+    }
+
+    private func toggleSelectAllGroups() {
+        if allCandidatesSelected {
+            selectedIDs.subtract(allCandidateIDs)
+        } else {
+            selectedIDs.formUnion(allCandidateIDs)
+        }
     }
 
     private func selectNonBestPhotos() {
@@ -1548,6 +1671,7 @@ struct SimilarCleanView: View {
         if selectedIDs.isEmpty {
             selectedIDs = Set(
                 groups
+                    .filter { $0.assets.count >= 2 }
                     .flatMap(\.assets)
                     .filter { !$0.isBest }
                     .map(\.id)
@@ -1569,7 +1693,48 @@ struct SimilarCleanView: View {
     }
 
     private func restoreCachedGroupsIfNeeded() {
-        library.restoreCachedDuplicateGroupsIfNeeded()
+        switch mode {
+        case .duplicate:
+            library.restoreCachedDuplicateGroupsIfNeeded()
+        case .burst:
+            library.loadBurstGroupsIfNeeded()
+        }
+    }
+
+    private var titleKey: LocalizedStringKey {
+        switch mode {
+        case .duplicate:
+            return "duplicate.title"
+        case .burst:
+            return "burst.title"
+        }
+    }
+
+    private var keptKey: LocalizedStringKey {
+        switch mode {
+        case .duplicate:
+            return "duplicate.original.kept"
+        case .burst:
+            return "burst.best.pick"
+        }
+    }
+
+    private var emptyTitleKey: LocalizedStringKey {
+        switch mode {
+        case .duplicate:
+            return "duplicate.empty"
+        case .burst:
+            return "burst.empty"
+        }
+    }
+
+    private var emptyDescriptionKey: LocalizedStringKey {
+        switch mode {
+        case .duplicate:
+            return "duplicate.empty.description"
+        case .burst:
+            return "burst.empty.description"
+        }
     }
 
     private func toggle(_ photo: SimilarAsset) {
@@ -1584,7 +1749,8 @@ struct SimilarCleanView: View {
         let identifiers = selectedIDs
         Task {
             do {
-                try await library.deleteAssets(with: identifiers)
+                try await library.deleteSimilarAssets(with: identifiers)
+                removedIDs.formUnion(identifiers)
                 selectedIDs.subtract(identifiers)
             } catch {
                 deletionError = error.localizedDescription
@@ -2125,16 +2291,42 @@ struct LivePhotoCleanView: View {
     let category: CleanerCategory
 
     @State private var selectedIDs = Set<String>()
-    @State private var removedIDs = Set<String>()
     @State private var showConfirmation = false
     @State private var operationError: String?
     @State private var previewAsset: IdentifiablePHAsset?
     @State private var recommendedIDs = Set<String>()
     @State private var isLoadingRecommendations = false
     @State private var recommendationTask: Task<Void, Never>?
+    @State private var convertedIDs = Set<String>()
+    @State private var convertedAssetsByOriginalID: [String: PHAsset] = [:]
+    @State private var convertingIDs = Set<String>()
 
-    private var assets: [PHAsset] {
-        library.livePhotoAssets.filter { !removedIDs.contains($0.localIdentifier) }
+    private struct SessionLiveAsset: Identifiable {
+        let originalID: String
+        let asset: PHAsset
+        let isConverted: Bool
+
+        var id: String { originalID }
+    }
+
+    private var activeAssets: [PHAsset] {
+        library.livePhotoAssets.filter { !convertedIDs.contains($0.localIdentifier) }
+    }
+
+    private var assets: [SessionLiveAsset] {
+        let active = activeAssets.map {
+            SessionLiveAsset(originalID: $0.localIdentifier, asset: $0, isConverted: false)
+        }
+        let converted = convertedAssetsByOriginalID.map { originalID, asset in
+            SessionLiveAsset(originalID: originalID, asset: asset, isConverted: true)
+        }
+        return (active + converted).sorted {
+            ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast)
+        }
+    }
+
+    private var previewAssets: [PHAsset] {
+        assets.map(\.asset)
     }
 
     private var columns: [GridItem] {
@@ -2162,14 +2354,19 @@ struct LivePhotoCleanView: View {
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 2) {
-                        ForEach(assets, id: \.localIdentifier) { asset in
+                        ForEach(assets) { item in
                             AssetGridItem(
-                                asset: asset,
-                                isSelected: selectedIDs.contains(asset.localIdentifier),
-                                storageText: liveStorageText(for: asset),
+                                asset: item.asset,
+                                isSelected: selectedIDs.contains(item.originalID),
+                                storageText: liveStorageText(for: item.asset),
                                 showsVideoBadge: false,
-                                onToggle: { toggleSelection(asset) },
-                                onPreview: { previewAsset = IdentifiablePHAsset(asset: asset) }
+                                showsSelectionControl: !item.isConverted && !convertingIDs.contains(item.originalID),
+                                statusLabelText: item.isConverted ? L("live.converted.status") : nil,
+                                statusSystemImage: item.isConverted ? "livephoto.slash" : nil,
+                                isLoading: convertingIDs.contains(item.originalID),
+                                allowsPreview: true,
+                                onToggle: { toggleSelection(item.asset) },
+                                onPreview: { previewAsset = IdentifiablePHAsset(asset: item.asset) }
                             )
                         }
                     }
@@ -2211,25 +2408,17 @@ struct LivePhotoCleanView: View {
         .animation(.easeOut(duration: 0.08), value: !selectedIDs.isEmpty)
         .assetPreview(
             $previewAsset,
-            assets: assets,
-            isSelected: { selectedIDs.contains($0) },
+            assets: previewAssets,
+            isSelected: { assetID in
+                selectedIDs.contains(assetID) || selectedIDs.contains(previewOriginalID(for: assetID) ?? assetID)
+            },
             onToggle: { item in toggleSelection(item.asset) }
         )
-        .confirmationDialog(
-            "live.convert.confirm.title",
+        .liveConvertConfirmation(
             isPresented: $showConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("live.convert.confirm.action", role: .destructive) {
-                convertSelected()
-            }
-            Button("cancel", role: .cancel) {}
-        } message: {
-            Text(String.localizedStringWithFormat(
-                L("live.convert.confirm.message"),
-                selectedIDs.count
-            ))
-        }
+            count: selectedIDs.count,
+            onConfirm: convertSelected
+        )
         .alert("operation.failed", isPresented: Binding(
             get: { operationError != nil },
             set: { if !$0 { operationError = nil } }
@@ -2247,10 +2436,10 @@ struct LivePhotoCleanView: View {
             recommendationTask = nil
         }
         .onChange(of: library.livePhotoAssets.map(\.localIdentifier)) {
-            let available = Set(assets.map(\.localIdentifier))
+            let available = Set(activeAssets.map(\.localIdentifier))
             selectedIDs = selectedIDs.intersection(available)
-            removedIDs = removedIDs.intersection(available)
             recommendedIDs = recommendedIDs.intersection(available)
+            convertingIDs = convertingIDs.intersection(available)
             startRecommendationAnalysis()
         }
     }
@@ -2287,7 +2476,7 @@ struct LivePhotoCleanView: View {
 
     private func startRecommendationAnalysis() {
         recommendationTask?.cancel()
-        let analysisAssets = assets
+        let analysisAssets = activeAssets
         guard !analysisAssets.isEmpty else {
             recommendedIDs = []
             isLoadingRecommendations = false
@@ -2298,14 +2487,15 @@ struct LivePhotoCleanView: View {
         recommendationTask = Task {
             let ids = await library.recommendedLivePhotoSlimmingIDs(for: analysisAssets)
             guard !Task.isCancelled else { return }
-            let available = Set(assets.map(\.localIdentifier))
+            let available = Set(activeAssets.map(\.localIdentifier))
             recommendedIDs = ids.intersection(available)
             isLoadingRecommendations = false
         }
     }
 
     private func toggleSelection(_ asset: PHAsset) {
-        let id = asset.localIdentifier
+        guard !convertingIDs.contains(asset.localIdentifier) else { return }
+        let id = previewOriginalID(for: asset.localIdentifier) ?? asset.localIdentifier
         if selectedIDs.contains(id) {
             selectedIDs.remove(id)
         } else {
@@ -2315,15 +2505,57 @@ struct LivePhotoCleanView: View {
 
     private func convertSelected() {
         let identifiers = selectedIDs
+        let cachedAssets = Dictionary(
+            uniqueKeysWithValues: activeAssets
+                .filter { identifiers.contains($0.localIdentifier) }
+                .map { ($0.localIdentifier, $0) }
+        )
+        convertingIDs.formUnion(identifiers)
         Task {
             do {
-                try await library.convertLivePhotosToStill(with: identifiers)
-                removedIDs.formUnion(identifiers)
+                let createdAssetIDByOriginalID = try await library.convertLivePhotosToStill(with: identifiers)
+                let replacementAssets = fetchAssets(
+                    with: createdAssetIDByOriginalID,
+                    fallbackAssetsByOriginalID: cachedAssets
+                )
+                convertedAssetsByOriginalID.merge(replacementAssets) { _, replacement in replacement }
+                convertedIDs.formUnion(identifiers)
                 selectedIDs.subtract(identifiers)
+                recommendedIDs.subtract(identifiers)
+                convertingIDs.subtract(identifiers)
             } catch {
+                convertingIDs.subtract(identifiers)
                 operationError = error.localizedDescription
             }
         }
+    }
+
+    private func previewOriginalID(for assetID: String) -> String? {
+        convertedAssetsByOriginalID.first(where: { $0.value.localIdentifier == assetID })?.key
+    }
+
+    private func fetchAssets(
+        with createdAssetIDByOriginalID: [String: String],
+        fallbackAssetsByOriginalID: [String: PHAsset]
+    ) -> [String: PHAsset] {
+        guard !createdAssetIDByOriginalID.isEmpty else { return fallbackAssetsByOriginalID }
+
+        let createdIDs = Array(createdAssetIDByOriginalID.values)
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: createdIDs, options: nil)
+        var fetchedByAssetID: [String: PHAsset] = [:]
+        result.enumerateObjects { asset, _, _ in
+            fetchedByAssetID[asset.localIdentifier] = asset
+        }
+
+        var resolved: [String: PHAsset] = [:]
+        for (originalID, createdID) in createdAssetIDByOriginalID {
+            if let asset = fetchedByAssetID[createdID] {
+                resolved[originalID] = asset
+            } else if let fallback = fallbackAssetsByOriginalID[originalID] {
+                resolved[originalID] = fallback
+            }
+        }
+        return resolved
     }
 }
 
@@ -2332,6 +2564,11 @@ private struct AssetGridItem: View {
     let isSelected: Bool
     let storageText: String
     let showsVideoBadge: Bool
+    var showsSelectionControl: Bool = true
+    var statusLabelText: String? = nil
+    var statusSystemImage: String? = nil
+    var isLoading: Bool = false
+    var allowsPreview: Bool = true
     let onToggle: () -> Void
     let onPreview: () -> Void
 
@@ -2356,8 +2593,13 @@ private struct AssetGridItem: View {
                         .allowsHitTesting(false)
                 }
 
-                selectionButton
-                    .padding(6)
+                if showsSelectionControl {
+                    selectionButton
+                        .padding(6)
+                } else if let statusLabelText {
+                    statusBadge(text: statusLabelText, systemImage: statusSystemImage)
+                        .padding(6)
+                }
 
                 HStack {
                     storageBadge
@@ -2365,6 +2607,15 @@ private struct AssetGridItem: View {
                 }
                 .padding(7)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+
+                if isLoading {
+                    Color.black.opacity(0.28)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    ProgressView()
+                        .tint(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             }
             .background(Color.cleanerCard)
             .clipShape(Rectangle())
@@ -2373,7 +2624,10 @@ private struct AssetGridItem: View {
                     .stroke(Color.cleanerBorder, lineWidth: 0.5)
             }
             .contentShape(Rectangle())
-            .onTapGesture(perform: onPreview)
+            .onTapGesture {
+                guard allowsPreview else { return }
+                onPreview()
+            }
         }
         .aspectRatio(1, contentMode: .fit)
     }
@@ -2405,6 +2659,21 @@ private struct AssetGridItem: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(isSelected ? "unselect" : "select"))
+    }
+
+    private func statusBadge(text: String, systemImage: String?) -> some View {
+        Group {
+            if let systemImage {
+                Label(text, systemImage: systemImage)
+            } else {
+                Text(text)
+            }
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(Color.cleanerGreen)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.ultraThinMaterial, in: Capsule())
     }
 }
 
@@ -3375,19 +3644,21 @@ struct SmartPhotoSearchView: View {
     @State private var submittedQuery = ""
     @State private var results: [PHAsset] = []
     @State private var resultStorageLabels: [String: String] = [:]
+    @State private var selectedResultIDs = Set<String>()
     @State private var isParsing = false
     @State private var isSearching = false
+    @State private var isPreparingShare = false
     @State private var errorMessage: String?
+    @State private var deletionError: String?
     @State private var previewAsset: IdentifiablePHAsset?
+    @State private var shareURLs: [URL] = []
+    @State private var showDeleteConfirmation = false
     @State private var didStartPress = false
     @FocusState private var isSearchFieldFocused: Bool
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                CleanerHeader(title: L("tab.smart.search"))
-                    .padding(.top, 18)
-
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.footnote)
@@ -3398,7 +3669,8 @@ struct SmartPhotoSearchView: View {
 
                 resultsContent
             }
-            .padding(.bottom, 96)
+            .padding(.top, 8)
+            .padding(.bottom, selectedCount > 0 ? 156 : 96)
         }
         .scrollDismissesKeyboard(.immediately)
         .simultaneousGesture(
@@ -3408,18 +3680,11 @@ struct SmartPhotoSearchView: View {
         )
         .background(Color.cleanerBackground)
         .safeAreaInset(edge: .bottom) {
-            searchInputBar
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button {
-                    dismissSearchKeyboard()
-                } label: {
-                    Image(systemName: "keyboard.chevron.compact.down")
-                        .font(.body.weight(.semibold))
+            VStack(spacing: 10) {
+                if selectedCount > 0 {
+                    selectionActionBar
                 }
-                .accessibilityLabel(Text("smart.search.dismiss.keyboard"))
+                searchInputBar
             }
         }
         .animatedTabBarVisible()
@@ -3428,6 +3693,12 @@ struct SmartPhotoSearchView: View {
             guard speech.isRecording else { return }
             queryText = newValue
         }
+        .onChange(of: results.map(\.localIdentifier)) { _, newValue in
+            selectedResultIDs.formIntersection(Set(newValue))
+            if let previewAsset, !newValue.contains(previewAsset.id) {
+                self.previewAsset = nil
+            }
+        }
         .alert("smart.search.network.title", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -3435,6 +3706,31 @@ struct SmartPhotoSearchView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "")
+        }
+        .alert("delete.failed", isPresented: Binding(
+            get: { deletionError != nil },
+            set: { if !$0 { deletionError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(deletionError ?? "")
+        }
+        .monthlyDeleteConfirmation(
+            isPresented: $showDeleteConfirmation,
+            count: selectedCount,
+            onConfirm: deleteSelectedResults
+        )
+        .sheet(
+            isPresented: Binding(
+                get: { !shareURLs.isEmpty },
+                set: { isPresented in
+                    if !isPresented {
+                        cleanupShareURLs()
+                    }
+                }
+            )
+        ) {
+            ActivityView(activityItems: shareURLs)
         }
     }
 
@@ -3467,6 +3763,8 @@ struct SmartPhotoSearchView: View {
                 SmartSearchResultsGrid(
                     results: results,
                     storageLabels: resultStorageLabels,
+                    selectedIDs: selectedResultIDs,
+                    onToggleSelection: toggleSelection,
                     onPreview: { asset in
                         dismissSearchKeyboard()
                         previewAsset = IdentifiablePHAsset(asset: asset)
@@ -3531,6 +3829,62 @@ struct SmartPhotoSearchView: View {
         }
     }
 
+    private var selectionActionBar: some View {
+        HStack(spacing: 12) {
+            Text(String.localizedStringWithFormat(
+                L("month.marked.format"),
+                selectedCount
+            ))
+            .font(.subheadline.bold())
+            .monospacedDigit()
+
+            Spacer(minLength: 0)
+
+            Button {
+                shareSelectedResults()
+            } label: {
+                HStack(spacing: 6) {
+                    if isPreparingShare {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Color.cleanerBlue)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    Text("Share")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(Color.cleanerBlue)
+                .padding(.horizontal, 14)
+                .frame(height: 42)
+                .background(Color.cleanerBlue.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isPreparingShare)
+
+            Button {
+                showDeleteConfirmation = true
+            } label: {
+                Label(L("delete"), systemImage: "trash.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: 42)
+                    .background(Color.red, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+    }
+
+    private var selectedCount: Int {
+        selectedResultIDs.count
+    }
+
+    private var selectedResults: [PHAsset] {
+        results.filter { selectedResultIDs.contains($0.localIdentifier) }
+    }
+
     private var resultsTitle: String {
         if results.isEmpty {
             return L("smart.search.results")
@@ -3583,6 +3937,7 @@ struct SmartPhotoSearchView: View {
         submittedQuery = text
         results = []
         resultStorageLabels = [:]
+        selectedResultIDs = []
         isParsing = true
         isSearching = true
         dismissSearchKeyboard()
@@ -3604,16 +3959,70 @@ struct SmartPhotoSearchView: View {
             }
         }
     }
+
+    private func toggleSelection(_ asset: PHAsset) {
+        let id = asset.localIdentifier
+        if selectedResultIDs.contains(id) {
+            selectedResultIDs.remove(id)
+        } else {
+            selectedResultIDs.insert(id)
+        }
+    }
+
+    private func shareSelectedResults() {
+        let assets = selectedResults
+        guard !assets.isEmpty, !isPreparingShare else { return }
+
+        isPreparingShare = true
+        Task {
+            defer { isPreparingShare = false }
+
+            do {
+                shareURLs = try await library.exportAssetsForSharing(assets)
+            } catch {
+                deletionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteSelectedResults() {
+        let identifiers = selectedResultIDs
+        guard !identifiers.isEmpty else { return }
+
+        Task {
+            do {
+                try await library.deleteAssets(with: identifiers)
+                results.removeAll { identifiers.contains($0.localIdentifier) }
+                resultStorageLabels = resultStorageLabels.filter { !identifiers.contains($0.key) }
+                selectedResultIDs.subtract(identifiers)
+                if let previewAsset, identifiers.contains(previewAsset.id) {
+                    self.previewAsset = nil
+                }
+            } catch {
+                deletionError = error.localizedDescription
+            }
+        }
+    }
+
+    private func cleanupShareURLs() {
+        let urls = shareURLs
+        shareURLs = []
+        guard let directory = urls.first?.deletingLastPathComponent() else { return }
+        try? FileManager.default.removeItem(at: directory)
+    }
 }
 
 private struct SmartSearchResultsGrid: View, Equatable {
     let results: [PHAsset]
     let storageLabels: [String: String]
+    let selectedIDs: Set<String>
+    let onToggleSelection: (PHAsset) -> Void
     let onPreview: (PHAsset) -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.results.map(\.localIdentifier) == rhs.results.map(\.localIdentifier)
             && lhs.storageLabels == rhs.storageLabels
+            && lhs.selectedIDs == rhs.selectedIDs
     }
 
     var body: some View {
@@ -3624,10 +4033,10 @@ private struct SmartSearchResultsGrid: View, Equatable {
             ForEach(results, id: \.localIdentifier) { asset in
                 AssetGridItem(
                     asset: asset,
-                    isSelected: false,
+                    isSelected: selectedIDs.contains(asset.localIdentifier),
                     storageText: storageLabels[asset.localIdentifier] ?? "--",
                     showsVideoBadge: asset.mediaType == .video,
-                    onToggle: {},
+                    onToggle: { onToggleSelection(asset) },
                     onPreview: { onPreview(asset) }
                 )
             }
@@ -3813,11 +4222,42 @@ private extension View {
             )
         }
     }
+
+    func liveConvertConfirmation(
+        isPresented: Binding<Bool>,
+        count: Int,
+        onConfirm: @escaping () -> Void
+    ) -> some View {
+        alert("live.convert.confirm.title", isPresented: isPresented) {
+            Button("cancel", role: .cancel) {}
+            Button("live.convert.confirm.action", role: .destructive, action: onConfirm)
+        } message: {
+            Text(
+                String.localizedStringWithFormat(
+                    L("live.convert.confirm.message"),
+                    count
+                )
+            )
+        }
+    }
+}
+
+private struct InsetRowSeparator: View {
+    let leadingInset: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.cleanerBorder)
+            .frame(height: 0.5)
+            .padding(.leading, leadingInset)
+    }
 }
 
 struct SettingsView: View {
     @EnvironmentObject private var library: PhotoLibraryService
     @Environment(AppLanguageSettings.self) private var languageSettings
+    @Environment(\.requestReview) private var requestReview
+    @StateObject private var monthlyReminder = MonthlyReminderService.shared
     @State private var showLanguagePicker = false
     @State private var showCacheConfirmation = false
     @State private var isExportingSearchIndex = false
@@ -3830,6 +4270,23 @@ struct SettingsView: View {
                 CleanerHeader(title: L("tab.settings"))
 
                 SettingsGroup(title: L("settings.general.security")) {
+                    SettingsToggleRow(
+                        title: L("settings.monthly.reminder"),
+                        subtitle: monthlyReminderStatusDescription,
+                        systemImage: "bell.badge"
+                    ) {
+                        Binding(
+                            get: { monthlyReminder.isEnabled },
+                            set: { enabled in
+                                monthlyReminder.setEnabled(
+                                    enabled,
+                                    monthGroups: library.monthGroups,
+                                    reviewedCounts: library.monthlyReviewedCounts
+                                )
+                            }
+                        )
+                    }
+
                     Button {
                         showLanguagePicker = true
                     } label: {
@@ -3877,6 +4334,17 @@ struct SettingsView: View {
                 }
 
                 SettingsGroup(title: L("settings.support")) {
+                    Button {
+                        rateApp()
+                    } label: {
+                        SettingsActionRow(
+                            title: L("settings.rate"),
+                            value: nil,
+                            systemImage: "star"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     InfoPair(title: L("settings.version"), value: "1.0.0 (26)")
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
@@ -3953,6 +4421,31 @@ struct SettingsView: View {
         isExportingSearchIndex
             ? L("settings.smart.search.export.in.progress")
             : L("settings.smart.search.export.value")
+    }
+
+    private var monthlyReminderStatusDescription: String {
+        switch monthlyReminder.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return L("settings.monthly.reminder.description")
+        case .notDetermined:
+            return L("settings.monthly.reminder.pending")
+        case .denied:
+            return L("settings.monthly.reminder.denied")
+        @unknown default:
+            return L("settings.monthly.reminder.description")
+        }
+    }
+
+    private func rateApp() {
+        // 若已配置 App Store ID，则直接跳转到 App Store 的“撰写评价”页面；
+        // 否则退回到系统内置的评分弹窗。
+        let appStoreID = "" // TODO: 上架后填入真实的 App Store ID
+        if !appStoreID.isEmpty,
+           let url = URL(string: "https://apps.apple.com/app/id\(appStoreID)?action=write-review") {
+            UIApplication.shared.open(url)
+        } else {
+            requestReview()
+        }
     }
 
     private func exportSmartSearchIndex() {
@@ -4227,6 +4720,7 @@ private struct CategoryRow: View {
     @Environment(AppLanguageSettings.self) private var languageSettings
     let item: CleanerCategory
     let loadingText: String?
+    private var isLoading: Bool { loadingText != nil }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -4237,19 +4731,12 @@ private struct CategoryRow: View {
                 Text(languageSettings.string(item.titleKey))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.cleanerText)
-                if let loadingText {
-                    Text(loadingText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                } else {
-                    Text(String.localizedStringWithFormat(L("items.count.format"), item.count))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(String.localizedStringWithFormat(L("items.count.format"), item.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
-            if loadingText != nil {
+            if isLoading {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 24, height: 24)
@@ -4266,7 +4753,7 @@ private struct CategoryRow: View {
         .padding(.trailing, 20)
         .frame(minHeight: 56)
         .background(.white)
-        .overlay(alignment: .bottom) { Divider().padding(.leading, 20) }
+        .overlay(alignment: .bottom) { InsetRowSeparator(leadingInset: 20) }
     }
 }
 
@@ -4291,24 +4778,36 @@ private struct SimilarGroup: View {
     let group: SimilarAssetGroup
     @Binding var selectedIDs: Set<String>
     @Binding var previewPhoto: IdentifiablePHAsset?
+    var showSelectAll: Bool = false
+    var allSelected: Bool = false
+    var onToggleSelectAll: () -> Void = {}
     @EnvironmentObject private var library: PhotoLibraryService
+    
+    private var isResolvedGroup: Bool {
+        group.assets.count == 1
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                Spacer()
-                Button(allCandidatesSelected ? "select.none" : "select.all") {
-                    if allCandidatesSelected {
-                        selectedIDs.subtract(candidateIDs)
-                    } else {
-                        selectedIDs.formUnion(candidateIDs)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.bold))
+                    if isResolvedGroup {
+                        Text("similar.group.resolved")
+                            .font(.caption)
+                            .foregroundStyle(Color.cleanerGreen)
                     }
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.cleanerBlue)
-                .buttonStyle(.plain)
+                Spacer()
+                if showSelectAll && !isResolvedGroup {
+                    Button(allSelected ? "select.none" : "select.all") {
+                        onToggleSelectAll()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.cleanerBlue)
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 20)
 
@@ -4318,7 +4817,8 @@ private struct SimilarGroup: View {
                         SimilarPhotoCard(
                             photo: photo,
                             selected: selectedIDs.contains(photo.id),
-                            storageText: formattedStorage(library.storageBytes(for: photo.asset))
+                            storageText: formattedStorage(library.storageBytes(for: photo.asset)),
+                            showsSelectionControl: !isResolvedGroup
                         ) {
                             previewPhoto = IdentifiablePHAsset(asset: photo.asset)
                         } toggle: {
@@ -4334,20 +4834,13 @@ private struct SimilarGroup: View {
             }
         }
     }
-
-    private var candidateIDs: Set<String> {
-        Set(group.assets.filter { !$0.isBest }.map(\.id))
-    }
-
-    private var allCandidatesSelected: Bool {
-        !candidateIDs.isEmpty && candidateIDs.isSubset(of: selectedIDs)
-    }
 }
 
 private struct SimilarPhotoCard: View {
     let photo: SimilarAsset
     let selected: Bool
     let storageText: String
+    var showsSelectionControl: Bool = true
     let preview: () -> Void
     let toggle: () -> Void
 
@@ -4375,23 +4868,34 @@ private struct SimilarPhotoCard: View {
                     .allowsHitTesting(false)
             }
 
-            Button(action: toggle) {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(
-                        selected ? .white : .white.opacity(0.9),
-                        selected ? Color.cleanerBlue : Color.black.opacity(0.25)
-                    )
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-                    .transaction { transaction in
-                        transaction.animation = nil
-                    }
+            if showsSelectionControl {
+                Button(action: toggle) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(
+                            selected ? .white : .white.opacity(0.9),
+                            selected ? Color.cleanerBlue : Color.black.opacity(0.25)
+                        )
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                        .transaction { transaction in
+                            transaction.animation = nil
+                        }
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+                .padding(.trailing, 2)
+            } else {
+                Label("similar.group.kept.single", systemImage: "checkmark.circle.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.cleanerGreen)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.top, 8)
+                    .padding(.trailing, 8)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 2)
-            .padding(.trailing, 2)
 
             HStack {
                 Text(storageText)
@@ -4505,22 +5009,25 @@ private struct LanguagePickerSheet: View {
                 .font(.headline)
                 .padding(.horizontal, 16)
 
-            VStack(spacing: 0) {
-                ForEach(AppLanguageSettings.Option.allCases) { option in
-                    Button {
-                        languageSettings.selection = option
-                        dismiss()
-                    } label: {
-                        LanguageOptionRow(
-                            title: option == .system
-                                ? L("settings.language.system")
-                                : option.nativeDisplayName,
-                            isSelected: languageSettings.selection == option
-                        )
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(AppLanguageSettings.Option.allCases) { option in
+                        Button {
+                            languageSettings.selection = option
+                            dismiss()
+                        } label: {
+                            LanguageOptionRow(
+                                title: option == .system
+                                    ? L("settings.language.system")
+                                    : option.nativeDisplayName,
+                                isSelected: languageSettings.selection == option
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            .scrollIndicators(.visible)
             .background(.white, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.cleanerBorder))
             .padding(.horizontal, 16)
@@ -4535,7 +5042,7 @@ private struct LanguagePickerSheet: View {
         .padding(.top, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.cleanerBackground)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 }
@@ -4559,7 +5066,7 @@ private struct LanguageOptionRow: View {
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
         .contentShape(Rectangle())
-        .overlay(alignment: .bottom) { Divider().padding(.leading, 16) }
+        .overlay(alignment: .bottom) { InsetRowSeparator(leadingInset: 16) }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
@@ -4592,7 +5099,41 @@ private struct SettingsActionRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(minHeight: 52)
-        .overlay(alignment: .bottom) { Divider().padding(.leading, 52) }
+        .overlay(alignment: .bottom) { InsetRowSeparator(leadingInset: 52) }
+    }
+}
+
+private struct SettingsToggleRow: View {
+    let title: String
+    let subtitle: String?
+    let systemImage: String
+    let toggle: () -> Binding<Bool>
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .foregroundStyle(Color.cleanerBlue)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .layoutPriority(1)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Toggle("", isOn: toggle())
+                .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(minHeight: 52)
+        .overlay(alignment: .bottom) { InsetRowSeparator(leadingInset: 52) }
     }
 }
 
@@ -4629,13 +5170,13 @@ private struct InfoPair: View {
 
 struct CleanerCategory: Identifiable {
     enum Kind: Hashable {
-        case duplicate, screenshot, livePhoto, lowQuality, video, largeVideo, recording, emptyAlbum
+        case duplicate, burst, screenshot, livePhoto, lowQuality, video, largeVideo, recording, emptyAlbum
 
         var usesAssetGrid: Bool {
             switch self {
             case .screenshot, .video, .largeVideo, .recording:
                 return true
-            case .duplicate, .livePhoto, .lowQuality, .emptyAlbum:
+            case .duplicate, .burst, .livePhoto, .lowQuality, .emptyAlbum:
                 return false
             }
         }
@@ -4670,6 +5211,17 @@ struct CleanerCategory: Identifiable {
             color: .orange,
             icon: "rectangle.on.rectangle",
             kind: .duplicate
+        )
+    }
+
+    static func bursts(count: Int, size: String = "") -> CleanerCategory {
+        CleanerCategory(
+            titleKey: "category.bursts",
+            count: count,
+            size: size,
+            color: .cleanerGreen,
+            icon: "camera.aperture",
+            kind: .burst
         )
     }
 

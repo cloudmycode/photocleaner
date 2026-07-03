@@ -16,40 +16,42 @@ Schema:
   "items": [
     {
       "assetId": "same as input",
-      "enrichedTags": ["tag1"],
+      "tags": ["tag1"],
       "sensitiveTypes": [],
-      "searchDescription": "one sentence"
+      "searchText": "one sentence"
     }
   ]
 }
 
 Rules:
 
-1) enrichedTags
+1) tags
 - lowercase snake_case English only
 - keep ALL input rawTags unchanged
 - add 3–15 inferred semantic tags from OCR/object type (e.g. router, modem, onu, wifi, ticket, invoice, packaging, label)
-- do NOT put sensitiveTypes values here (no id_card in enrichedTags)
+- include sensitiveTypes values here too (e.g. id_card, bank_card) so the client can use a single tag index
 
 2) sensitiveTypes
 - only: id_card | bank_card | passport | document
 - set when OCR shows ID numbers, passport numbers, bank card numbers, or formal personal/document content
 - leave [] if none apply
 
-3) searchDescription — language (per item)
+3) searchText — language (per item)
+- Only generate searchText from ocrSnippet and document/text semantics. Do not rewrite rawTags into a sentence.
 - Detect the primary language from ocrSnippet script and vocabulary for EACH item independently.
 - Write the whole sentence in that detected language.
 - Supported languages (detect and write natively): English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, German, Italian, Portuguese, Russian, Arabic, Hindi, Thai, Vietnamese, Indonesian, Turkish, Polish, Dutch, Malay.
 - Mixed OCR: use the dominant language for sentence grammar; keep brand names, SSIDs, URLs, codes, and proper nouns in their original script inside the sentence.
-- If ocrSnippet is empty or only numbers/symbols: fall back to device locale language above.
+- If ocrSnippet is empty or only numbers/symbols: return an empty searchText.
 - purpose: client substring search — pack many concrete keywords, not marketing prose
 - must include: object/document type + purpose/use + key field labels from OCR
 - preserve important OCR literals as readable phrases: brand, model, SSID, IP, URL, account/password labels, names, numbers, flight codes
 - do NOT summarize away searchable words; do NOT use "..." or omit router/account/password info present in ocrSnippet
 - do NOT invent facts absent from rawTags/ocrSnippet
+- do NOT output a tag-only description such as "adult human people person"; if OCR has no searchable words, searchText must be empty
 - no uncertainty words: 可能, 大概, 推测, maybe, probably
 
-searchDescription examples (keyword-dense; language follows OCR):
+searchText examples (keyword-dense; language follows OCR):
 
 Input ocrSnippet: 产品型号 ZXHN G7715V5 XG-PON ONU WiFi 7 无线名称 MyHome-5G 登录密码 管理地址 192.168.1.1
 Output: 中兴 ZXHN G7715V5 XG-PON 光猫路由器标签照片，包含产品型号、WiFi 7 无线网络、无线名称 MyHome-5G、登录密码和管理地址 192.168.1.1 等宽带账号信息。

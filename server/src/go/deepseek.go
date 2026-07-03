@@ -113,19 +113,19 @@ func (c *DeepSeekClient) ParseQuery(prompt string) (map[string]interface{}, erro
 func (c *DeepSeekClient) parseJSONResponse(content string) (map[string]interface{}, error) {
 	// 移除可能的 markdown 代码块
 	content = strings.TrimSpace(content)
-	
+
 	// 移除开头的 ```json 或 ```
 	if strings.HasPrefix(content, "```json") {
 		content = content[7:]
 	} else if strings.HasPrefix(content, "```") {
 		content = content[3:]
 	}
-	
+
 	// 移除结尾的 ```
 	if strings.HasSuffix(content, "```") {
 		content = content[:len(content)-3]
 	}
-	
+
 	content = strings.TrimSpace(content)
 
 	var result map[string]interface{}

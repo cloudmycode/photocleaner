@@ -18,14 +18,13 @@ struct PhotoSearchIndexEntry: Codable {
     var ocrIndexedAt: Date?
     var sensitiveTypes: [String]?
     var tagsEnrichedAt: Date?
-    var searchDescription: String?
+    var searchText: String?
     var idCardName: String?
     var idCardNumber: String?
 }
 
 struct PhotoSearchIndexSnapshot {
     let tagPostings: [String: Set<String>]
-    let sensitivePostings: [String: Set<String>]
 }
 
 struct PhotoSearchDebugExport: Codable {
@@ -59,7 +58,7 @@ struct PhotoSearchDebugExportEntry: Codable {
     let ocrText: String?
     let ocrIndexedAt: Date?
     let sensitiveTypes: [String]
-    let searchDescription: String?
+    let searchText: String?
     let idCardName: String?
     let idCardNumber: String?
 }
@@ -72,11 +71,10 @@ actor PhotoSearchIndexStore {
 
     static let shared = PhotoSearchIndexStore()
 
-    private let algorithmVersion = 7
+    private let algorithmVersion = 9
     private let fileURL: URL
     private var entries: [String: PhotoSearchIndexEntry]?
     private var tagPostings: [String: Set<String>] = [:]
-    private var sensitivePostings: [String: Set<String>] = [:]
 
     init() {
         let baseURL = FileManager.default.urls(
@@ -109,10 +107,7 @@ actor PhotoSearchIndexStore {
 
     func searchIndex() -> PhotoSearchIndexSnapshot {
         loadIfNeeded()
-        return PhotoSearchIndexSnapshot(
-            tagPostings: tagPostings,
-            sensitivePostings: sensitivePostings
-        )
+        return PhotoSearchIndexSnapshot(tagPostings: tagPostings)
     }
 
     func rebuildMetadata(for assets: [PHAsset]) throws {
@@ -136,7 +131,7 @@ actor PhotoSearchIndexStore {
                 previousOCRIndexedAt: canReuse ? previous?.ocrIndexedAt : nil,
                 previousSensitiveTypes: canReuse ? previous?.sensitiveTypes : nil,
                 previousTagsEnrichedAt: canReuse ? previous?.tagsEnrichedAt : nil,
-                previousSearchDescription: canReuse ? previous?.searchDescription : nil
+                previousSearchText: canReuse ? previous?.searchText : nil
             )
             if canReuse, let previous {
                 entry.idCardName = previous.idCardName
@@ -190,23 +185,23 @@ actor PhotoSearchIndexStore {
             }
             let ocr = entry.ocrText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !ocr.isEmpty else { return false }
-            let description = entry.searchDescription?
+            let searchText = entry.searchText?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if description.isEmpty { return true }
+            if searchText.isEmpty { return true }
             return entry.tagsEnrichedAt == nil
         }
     }
 
     func updateEnrichedAnalyses(
-        _ values: [(asset: PHAsset, enrichedTags: [String], sensitiveTypes: [String], searchDescription: String)]
+        _ values: [(asset: PHAsset, tags: [String], sensitiveTypes: [String], searchText: String)]
     ) throws {
         guard !values.isEmpty else { return }
         loadIfNeeded()
         for value in values {
             upsertEnrichedAnalysis(
-                enrichedTags: value.enrichedTags,
+                tags: value.tags,
                 sensitiveTypes: value.sensitiveTypes,
-                searchDescription: value.searchDescription,
+                searchText: value.searchText,
                 cloudEnriched: true,
                 for: value.asset
             )
@@ -222,9 +217,9 @@ actor PhotoSearchIndexStore {
         loadIfNeeded()
         for value in values {
             upsertEnrichedAnalysis(
-                enrichedTags: [],
+                tags: [],
                 sensitiveTypes: value.sensitiveTypes,
-                searchDescription: nil,
+                searchText: nil,
                 cloudEnriched: false,
                 for: value.asset
             )
@@ -276,7 +271,6 @@ actor PhotoSearchIndexStore {
     func clear() throws {
         entries = [:]
         tagPostings = [:]
-        sensitivePostings = [:]
         if FileManager.default.fileExists(atPath: fileURL.path) {
             try FileManager.default.removeItem(at: fileURL)
         }
@@ -345,7 +339,7 @@ actor PhotoSearchIndexStore {
                         ocrText: entry.ocrText,
                         visualTags: entry.visualTags
                     ),
-                searchDescription: entry.searchDescription,
+                searchText: entry.searchText,
                 idCardName: entry.idCardName,
                 idCardNumber: entry.idCardNumber
             )
@@ -366,7 +360,7 @@ actor PhotoSearchIndexStore {
             idCardCount: rows.count { $0.sensitiveTypes.contains("id_card") },
             searchInputs: [
                 "visualTags",
-                "searchDescription",
+                "searchText",
                 "ocrText",
                 "idCardName",
                 "idCardNumber",
@@ -450,16 +444,13 @@ actor PhotoSearchIndexStore {
             previousOCRIndexedAt: Date(),
             previousSensitiveTypes: previous?.sensitiveTypes,
             previousTagsEnrichedAt: previous?.tagsEnrichedAt,
-            previousSearchDescription: previous?.searchDescription
+            previousSearchText: previous?.searchText
         )
         entry.visualTags = visualTags
         entry.visualIndexedAt = Date()
         entry.ocrText = ocrText
         entry.ocrIndexedAt = Date()
-        entry.searchDescription = PhotoSearchIndexEntry.makeLocalSearchDescription(
-            visualTags: visualTags,
-            ocrText: ocrText
-        )
+        entry.searchText = nil
         applyIDCardFields(to: &entry)
         entries?[id] = entry
     }
@@ -477,12 +468,12 @@ actor PhotoSearchIndexStore {
             previousOCRIndexedAt: Date(),
             previousSensitiveTypes: previous?.sensitiveTypes,
             previousTagsEnrichedAt: nil,
-            previousSearchDescription: nil
+            previousSearchText: nil
         )
         entry.ocrText = text
         entry.ocrIndexedAt = Date()
         entry.tagsEnrichedAt = nil
-        entry.searchDescription = nil
+        entry.searchText = nil
         applyIDCardFields(to: &entry)
         entries?[id] = entry
     }
@@ -500,24 +491,18 @@ actor PhotoSearchIndexStore {
             previousOCRIndexedAt: previous?.ocrIndexedAt,
             previousSensitiveTypes: previous?.sensitiveTypes,
             previousTagsEnrichedAt: previous?.tagsEnrichedAt,
-            previousSearchDescription: previous?.searchDescription
+            previousSearchText: previous?.searchText
         )
         entry.visualTags = tags
         entry.visualIndexedAt = Date()
-        if (entry.searchDescription ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            entry.searchDescription = PhotoSearchIndexEntry.makeLocalSearchDescription(
-                visualTags: tags,
-                ocrText: previous?.ocrText
-            )
-        }
         patchTagPostings(photoId: id, oldTags: previous?.visualTags, newTags: tags)
         entries?[id] = entry
     }
 
     private func upsertEnrichedAnalysis(
-        enrichedTags: [String],
+        tags: [String],
         sensitiveTypes: [String],
-        searchDescription: String?,
+        searchText: String?,
         cloudEnriched: Bool,
         for asset: PHAsset
     ) {
@@ -528,52 +513,41 @@ actor PhotoSearchIndexStore {
         if cloudEnriched {
             mergedTags = Self.mergedVisualTags(
                 previous: previous?.visualTags ?? [],
-                enriched: enrichedTags
+                enriched: tags
             )
         } else {
             mergedTags = previous?.visualTags ?? []
         }
         let sensitive = Array(Set(sensitiveTypes)).sorted()
-
-        if cloudEnriched {
-            patchTagPostings(photoId: id, oldTags: previous?.visualTags, newTags: mergedTags)
-        }
-        patchSensitivePostings(
-            photoId: id,
-            oldTypes: previous?.sensitiveTypes,
-            newTypes: sensitive
+        let newTags = Self.mergedVisualTags(
+            previous: mergedTags,
+            enriched: sensitive
         )
+
+        patchTagPostings(photoId: id, oldTags: previous?.visualTags, newTags: newTags)
 
         var entry = Self.entry(
             for: asset,
             signature: signature,
-            previousVisualTags: mergedTags,
+            previousVisualTags: newTags,
             previousVisualIndexedAt: previous?.visualIndexedAt ?? Date(),
             previousOCRText: previous?.ocrText,
             previousOCRIndexedAt: previous?.ocrIndexedAt,
             previousSensitiveTypes: sensitive.isEmpty ? nil : sensitive,
             previousTagsEnrichedAt: cloudEnriched ? Date() : previous?.tagsEnrichedAt,
-            previousSearchDescription: previous?.searchDescription
+            previousSearchText: previous?.searchText
         )
-        entry.visualTags = mergedTags
+        entry.visualTags = newTags
         entry.sensitiveTypes = sensitive.isEmpty ? nil : sensitive
         if cloudEnriched {
-            let trimmed = searchDescription?
+            let trimmed = searchText?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !trimmed.isEmpty {
-                entry.searchDescription = trimmed
+                entry.searchText = trimmed
             } else {
-                entry.searchDescription = PhotoSearchIndexEntry.makeLocalSearchDescription(
-                    visualTags: mergedTags,
-                    ocrText: previous?.ocrText
-                )
+                entry.searchText = nil
             }
             entry.tagsEnrichedAt = Date()
-        } else if (entry.searchDescription ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            entry.searchDescription = PhotoSearchIndexEntry.makeLocalSearchDescription(
-                visualTags: mergedTags,
-                ocrText: previous?.ocrText
-            )
         }
         applyIDCardFields(to: &entry)
         entries?[id] = entry
@@ -610,7 +584,7 @@ actor PhotoSearchIndexStore {
         previousOCRIndexedAt: Date?,
         previousSensitiveTypes: [String]?,
         previousTagsEnrichedAt: Date? = nil,
-        previousSearchDescription: String? = nil
+        previousSearchText: String? = nil
     ) -> PhotoSearchIndexEntry {
         PhotoSearchIndexEntry(
             id: asset.localIdentifier,
@@ -629,7 +603,7 @@ actor PhotoSearchIndexStore {
             ocrIndexedAt: previousOCRIndexedAt,
             sensitiveTypes: previousSensitiveTypes,
             tagsEnrichedAt: previousTagsEnrichedAt,
-            searchDescription: previousSearchDescription,
+            searchText: previousSearchText,
             idCardName: nil,
             idCardNumber: nil
         )
@@ -637,7 +611,6 @@ actor PhotoSearchIndexStore {
 
     private func rebuildPostings() {
         tagPostings = [:]
-        sensitivePostings = [:]
         guard let entries else { return }
         for entry in entries.values {
             insertPostings(for: entry)
@@ -648,9 +621,6 @@ actor PhotoSearchIndexStore {
         let id = entry.id
         for tag in entry.visualTags ?? [] {
             tagPostings[tag, default: []].insert(id)
-        }
-        for type in entry.sensitiveTypes ?? [] {
-            sensitivePostings[type, default: []].insert(id)
         }
     }
 
@@ -663,22 +633,6 @@ actor PhotoSearchIndexStore {
         }
         for tag in newTags {
             tagPostings[tag, default: []].insert(photoId)
-        }
-    }
-
-    private func patchSensitivePostings(
-        photoId: String,
-        oldTypes: [String]?,
-        newTypes: [String]
-    ) {
-        for type in oldTypes ?? [] {
-            sensitivePostings[type]?.remove(photoId)
-            if sensitivePostings[type]?.isEmpty == true {
-                sensitivePostings.removeValue(forKey: type)
-            }
-        }
-        for type in newTypes {
-            sensitivePostings[type, default: []].insert(photoId)
         }
     }
 
@@ -957,9 +911,10 @@ actor DetailGroupCache {
     private struct Payload: Codable {
         let version: Int
         let duplicateGroups: [CachedDetailGroup]
+        let burstGroups: [CachedDetailGroup]
     }
 
-    private let algorithmVersion = 2
+    private let algorithmVersion = 4
     private let fileURL: URL
     private var payload: Payload?
 
@@ -984,16 +939,32 @@ actor DetailGroupCache {
         return payload?.duplicateGroups ?? []
     }
 
+    func loadBurstGroups() -> [CachedDetailGroup] {
+        loadIfNeeded()
+        return payload?.burstGroups ?? []
+    }
+
     func saveDuplicateGroups(_ groups: [SimilarAssetGroup]) throws {
         loadIfNeeded()
         let nextPayload = Payload(
             version: algorithmVersion,
-            duplicateGroups: groups.map(Self.cachedGroup)
+            duplicateGroups: groups.map(Self.cachedGroup),
+            burstGroups: payload?.burstGroups ?? []
         )
         try save(nextPayload)
     }
 
-    func hasAnyCachedGroups() -> Bool {
+    func saveBurstGroups(_ groups: [SimilarAssetGroup]) throws {
+        loadIfNeeded()
+        let nextPayload = Payload(
+            version: algorithmVersion,
+            duplicateGroups: payload?.duplicateGroups ?? [],
+            burstGroups: groups.map(Self.cachedGroup)
+        )
+        try save(nextPayload)
+    }
+
+    func hasCachedDuplicateGroups() -> Bool {
         loadIfNeeded()
         return !(payload?.duplicateGroups.isEmpty ?? true)
     }
@@ -1019,7 +990,7 @@ actor DetailGroupCache {
         guard let data = try? Data(contentsOf: fileURL),
               let stored = try? JSONDecoder().decode(Payload.self, from: data),
               stored.version == algorithmVersion else {
-            payload = Payload(version: algorithmVersion, duplicateGroups: [])
+            payload = Payload(version: algorithmVersion, duplicateGroups: [], burstGroups: [])
             return
         }
         payload = stored

@@ -1,45 +1,47 @@
 import Foundation
 
-/// 本地检索：关键词描述匹配 / 倒排交集 → filters → 按时间截断
+/// 本地检索：tag 倒排交集 / 文本组匹配 → filters → 按时间截断
 enum SearchEngine {
     static func match(
         plan: SearchPlan,
         entries: [String: PhotoSearchIndexEntry],
-        tagPostings: [String: Set<String>],
-        sensitivePostings: [String: Set<String>]
+        tagPostings: [String: Set<String>]
     ) -> [PhotoSearchIndexEntry] {
         let indexedIDs = Set(entries.keys)
         guard !indexedIDs.isEmpty else { return [] }
 
         let must = plan.must ?? SearchMust()
-        let keywordGroups = normalizedKeywordGroups(must.searchKeywordGroups ?? [])
-        let visualTagGroups = normalizedKeywordGroups(must.visualTagGroups ?? [])
-        let sensitiveTypes = must.sensitiveTypes ?? []
+        let tagGroups = normalizedGroups(must.tagGroups ?? [])
+        let textGroups = normalizedGroups(must.textGroups ?? [])
 
-        var ids: Set<String>?
-
-        if !keywordGroups.isEmpty {
-            ids = matchKeywordGroups(keywordGroups, entries: entries, indexedIDs: indexedIDs)
+        guard !tagGroups.isEmpty || !textGroups.isEmpty || hasAnyFilter(plan.filters) else {
+            return []
         }
 
-        if !visualTagGroups.isEmpty || !sensitiveTypes.isEmpty {
-            let visualIDs = intersectGroups(
-                visualTagGroups: visualTagGroups,
-                sensitiveTypes: sensitiveTypes,
-                indexedIDs: indexedIDs,
-                tagPostings: tagPostings,
-                sensitivePostings: sensitivePostings
-            )
-            ids = ids.map { $0.intersection(visualIDs) } ?? visualIDs
-        }
-
-        guard var matchedIDs = ids else { return [] }
-
-        for text in must.ocrContainsAll ?? [] {
-            let needle = text.lowercased()
-            guard !needle.isEmpty else { continue }
-            matchedIDs = matchedIDs.filter { id in
-                entries[id]?.searchableOCRText.lowercased().contains(needle) == true
+        var matchedIDs: Set<String>
+        if tagGroups.isEmpty, textGroups.isEmpty {
+            // 只有 filters：从全部索引出发，交给 filters 过滤
+            matchedIDs = indexedIDs
+        } else {
+            // tagGroups 与 textGroups 取并集：命中任一即保留
+            matchedIDs = Set<String>()
+            if !tagGroups.isEmpty {
+                matchedIDs.formUnion(
+                    intersectTagGroups(
+                        tagGroups,
+                        indexedIDs: indexedIDs,
+                        tagPostings: tagPostings
+                    )
+                )
+            }
+            if !textGroups.isEmpty {
+                matchedIDs.formUnion(
+                    matchTextGroups(
+                        textGroups,
+                        entries: entries,
+                        indexedIDs: indexedIDs
+                    )
+                )
             }
         }
 
@@ -54,7 +56,21 @@ enum SearchEngine {
             .map { $0 }
     }
 
-    private static func normalizedKeywordGroups(_ groups: [[String]]) -> [[String]] {
+    private static func hasAnyFilter(_ filters: SearchFilters?) -> Bool {
+        guard let filters else { return false }
+        if filters.dateRange != nil { return true }
+        if filters.locationBounds?.isEmpty == false { return true }
+        if filters.mediaTypes?.isEmpty == false { return true }
+        if filters.assetTypes?.isEmpty == false { return true }
+        if filters.minSizeMB != nil { return true }
+        if filters.maxSizeMB != nil { return true }
+        if filters.minPixelWidth != nil { return true }
+        if filters.minPixelHeight != nil { return true }
+        if filters.hasLocation != nil { return true }
+        return false
+    }
+
+    private static func normalizedGroups(_ groups: [[String]]) -> [[String]] {
         groups.compactMap { group in
             let words = group
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
@@ -63,8 +79,29 @@ enum SearchEngine {
         }
     }
 
-    /// 组内任一关键词命中（OR），组间全部满足（AND）
-    private static func matchKeywordGroups(
+    /// tag 组：组内并集（OR），组间交集（AND）
+    private static func intersectTagGroups(
+        _ groups: [[String]],
+        indexedIDs: Set<String>,
+        tagPostings: [String: Set<String>]
+    ) -> Set<String> {
+        var result: Set<String>?
+
+        for group in groups {
+            var groupIDs = Set<String>()
+            for tag in group {
+                if let set = tagPostings[tag] {
+                    groupIDs.formUnion(set)
+                }
+            }
+            result = result.map { $0.intersection(groupIDs) } ?? groupIDs
+        }
+
+        return (result ?? []).intersection(indexedIDs)
+    }
+
+    /// 文本组：组内任一关键词命中（OR），组间全部满足（AND）
+    private static func matchTextGroups(
         _ groups: [[String]],
         entries: [String: PhotoSearchIndexEntry],
         indexedIDs: Set<String>
@@ -72,7 +109,7 @@ enum SearchEngine {
         var matched = Set<String>()
         for id in indexedIDs {
             guard let entry = entries[id] else { continue }
-            let haystack = entry.searchableDescriptionText.lowercased()
+            let haystack = entry.searchableText.lowercased()
             guard !haystack.isEmpty else { continue }
             let allGroupsHit = groups.allSatisfy { group in
                 group.contains { haystack.contains($0) }
@@ -82,34 +119,6 @@ enum SearchEngine {
             }
         }
         return matched
-    }
-
-    /// 视觉 tag 组：组内并集（OR，同义词由服务端展开），组间交集（AND）；敏感类型组间交集
-    private static func intersectGroups(
-        visualTagGroups: [[String]],
-        sensitiveTypes: [String],
-        indexedIDs: Set<String>,
-        tagPostings: [String: Set<String>],
-        sensitivePostings: [String: Set<String>]
-    ) -> Set<String> {
-        var result: Set<String>?
-
-        for group in visualTagGroups {
-            var groupIDs = Set<String>()
-            for tag in group {
-                if let set = tagPostings[tag] {
-                    groupIDs.formUnion(set)
-                }
-            }
-            result = result.map { $0.intersection(groupIDs) } ?? groupIDs
-        }
-        for type in sensitiveTypes {
-            let group = sensitivePostings[type] ?? []
-            result = result.map { $0.intersection(group) } ?? group
-        }
-
-        let base = result ?? []
-        return base.intersection(indexedIDs)
     }
 
     private static func passesFilters(

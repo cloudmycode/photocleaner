@@ -125,22 +125,17 @@ extension PhotoSearchIndexEntry {
             .joined(separator: "\n")
     }
 
-    /// 检索用描述：云端句子优先，否则本地 tag + OCR 拼接
-    var searchableDescriptionText: String {
-        let stored = searchDescription?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !stored.isEmpty { return stored }
-        return Self.makeLocalSearchDescription(
-            visualTags: visualTags ?? [],
-            ocrText: searchableOCRText
-        )
+    /// 检索用文本：只使用云端基于 OCR 生成的 searchText，不把视觉 tag 拼成文本。
+    var searchableIndexText: String {
+        searchText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    static func makeLocalSearchDescription(visualTags: [String], ocrText: String?) -> String {
-        var parts: [String] = []
-        parts.append(contentsOf: visualTags)
-        if let ocr = ocrText?.trimmingCharacters(in: .whitespacesAndNewlines), !ocr.isEmpty {
-            parts.append(ocr)
-        }
-        return parts.joined(separator: " ")
+    /// Unified text field for smart search: OCR-derived search text + local OCR derivatives.
+    var searchableText: String {
+        [searchableIndexText, searchableOCRText]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
     }
+
 }

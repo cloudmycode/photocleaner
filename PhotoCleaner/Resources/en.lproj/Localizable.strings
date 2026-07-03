@@ -19,6 +19,7 @@
 "items.count.format" = "%lld items";
 "videos.count.format" = "%@ videos";
 "category.duplicates" = "Duplicate Photos";
+"category.bursts" = "Burst Photos";
 "category.screenshots" = "Screenshots";
 "category.live.photos" = "Live Photo Slimming";
 "category.low.quality" = "Low Quality";
@@ -93,6 +94,10 @@
 "settings.keep.original" = "Keep original videos";
 "settings.general.security" = "General & Security";
 "settings.language" = "Language";
+"settings.monthly.reminder" = "Monthly cleanup reminder";
+"settings.monthly.reminder.description" = "Remind me when last month's photos are ready to organize.";
+"settings.monthly.reminder.pending" = "Turn on to allow local notifications.";
+"settings.monthly.reminder.denied" = "Notifications are off in system settings.";
 "settings.language.system" = "System Default";
 "settings.language.hint" = "The interface updates immediately after you change the language.";
 "settings.clear.cache" = "Clear cache";
@@ -126,6 +131,13 @@
 "duplicate.empty" = "No Duplicate Photos";
 "duplicate.empty.description" = "No matching photo copies were found.";
 "duplicate.analyzing.format" = "Checking duplicate photos %d/%d";
+"similar.group.resolved" = "1 photo kept, the rest were deleted";
+"similar.group.kept.single" = "1 kept";
+"burst.title" = "Burst Photos";
+"burst.best.pick" = "Best pick kept";
+"burst.empty" = "No Burst Photos";
+"burst.empty.description" = "No burst or rapid-shot groups were found.";
+"burst.group.title.format" = "%@ · %d shots";
 "mark.for.deletion" = "Mark for deletion";
 "month.marked.format" = "%d photos marked";
 "month.marked.description" = "Review first, then delete together";
@@ -163,7 +175,10 @@
 "live.convert.confirm.title" = "Remove Live motion?";
 "live.convert.confirm.message" = "%d still photos will be kept, and the original Live Photos will be moved to Recently Deleted.";
 "live.convert.confirm.action" = "Convert to Still Photos";
+"live.converted.status" = "Converted to still";
 "live.motion.size.format" = "Motion %@";
+"monthly.reminder.title" = "Last month's photos are ready";
+"monthly.reminder.body.format" = "Your %@ photos can be organized now. Take a quick pass through them.";
 "tab.smart.search" = "Smart Search";
 "smart.search.prompt" = "Describe the photos you want to find";
 "smart.search.placeholder" = "Example: find photos from last year in Hainan";

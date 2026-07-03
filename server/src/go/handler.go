@@ -65,22 +65,6 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if req.Locale == "" {
-		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"error":   "invalid_request",
-			"message": "locale is required",
-		})
-		return
-	}
-
-	if req.AvailableTags == nil {
-		h.writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-			"error":   "invalid_request",
-			"message": "availableTags is required",
-		})
-		return
-	}
-
 	if req.Sign == "" {
 		h.writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
 			"error":   "unauthorized",
@@ -98,6 +82,11 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	locale := strings.TrimSpace(req.Locale)
+	if locale == "" {
+		locale = "und"
+	}
+
 	expectedSign := calculateMD5(query + h.config.ServerSecret)
 	if strings.ToLower(req.Sign) != expectedSign {
 		h.writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
@@ -107,9 +96,19 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// 记录客户端提交上来的原始数据（sign 不记录，避免泄露签名）
+	h.logger.Info("Received search request", map[string]interface{}{
+		"query":        query,
+		"locale":       locale,
+		"appVersion":   req.AppVersion,
+		"buildVersion": req.BuildVersion,
+		"tagCount":     len(req.AvailableTags),
+		"tags":         req.AvailableTags,
+	})
+
 	currentDate := time.Now().Format("2006-01-02")
 
-	raw, err := h.client.ParseQuery(renderPromptInternal(query, req.Locale, currentDate, req.AvailableTags))
+	raw, err := h.client.ParseQuery(renderPromptInternal(query, locale, currentDate, req.AvailableTags))
 	if err != nil {
 		h.logger.Error("DeepSeek API error", map[string]interface{}{
 			"query": query,
@@ -119,19 +118,18 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	plan := normalizeSearchPlan(raw, query, h.config)
-	plan.Must.VisualTagGroups = filterVisualTagGroupsInAvailable(plan.Must.VisualTagGroups, req.AvailableTags)
+	plan := normalizeSearchPlan(raw, query, req.AvailableTags, h.config)
+	plan.Must.TagGroups = filterTagGroupsInAvailable(plan.Must.TagGroups, req.AvailableTags)
 	plan.Must = ensureMustArrays(plan.Must)
 
 	h.logger.Info("Smart search completed", map[string]interface{}{
-		"query":               query,
-		"locale":              req.Locale,
-		"appVersion":          req.AppVersion,
-		"tagCount":            len(req.AvailableTags),
-		"searchKeywordGroups": plan.Must.SearchKeywordGroups,
-		"visualTagGroups":     plan.Must.VisualTagGroups,
-		"sensitive":           plan.Must.SensitiveTypes,
-		"count":               plan.Count,
+		"query":      query,
+		"locale":     locale,
+		"appVersion": req.AppVersion,
+		"tagCount":   len(req.AvailableTags),
+		"textGroups": plan.Must.TextGroups,
+		"tagGroups":  plan.Must.TagGroups,
+		"count":      plan.Count,
 	})
 
 	h.writeJSON(w, http.StatusOK, plan)

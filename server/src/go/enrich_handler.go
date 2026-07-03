@@ -9,11 +9,11 @@ import (
 
 // EnrichItem 单张图片扩 tag 请求项
 type EnrichItem struct {
-	AssetID     string   `json:"assetId"`
-	RawTags     []string `json:"rawTags"`
-	OCRSnippet  string   `json:"ocrSnippet"`
-	MediaType   string   `json:"mediaType"`
-	AssetTypes  []string `json:"assetTypes"`
+	AssetID    string   `json:"assetId"`
+	RawTags    []string `json:"rawTags"`
+	OCRSnippet string   `json:"ocrSnippet"`
+	MediaType  string   `json:"mediaType"`
+	AssetTypes []string `json:"assetTypes"`
 }
 
 // EnrichRequest 扩 tag 请求
@@ -28,10 +28,10 @@ type EnrichRequest struct {
 
 // EnrichResultItem 扩 tag 响应项
 type EnrichResultItem struct {
-	AssetID           string   `json:"assetId"`
-	EnrichedTags      []string `json:"enrichedTags"`
-	SensitiveTypes    []string `json:"sensitiveTypes"`
-	SearchDescription string   `json:"searchDescription"`
+	AssetID        string   `json:"assetId"`
+	Tags           []string `json:"tags"`
+	SensitiveTypes []string `json:"sensitiveTypes"`
+	SearchText     string   `json:"searchText"`
 }
 
 // EnrichResponse 扩 tag 响应
@@ -101,6 +101,16 @@ func (h *EnrichTagsHandler) HandleEnrich(w http.ResponseWriter, r *http.Request)
 		locale = "en"
 	}
 
+	// 记录客户端提交上来的原始数据（sign 不记录，避免泄露签名）
+	h.logger.Info("Received enrich request", map[string]interface{}{
+		"deviceId":     deviceID,
+		"locale":       req.Locale,
+		"appVersion":   req.AppVersion,
+		"buildVersion": req.BuildVersion,
+		"itemCount":    len(req.Items),
+		"items":        req.Items,
+	})
+
 	raw, err := h.client.ParseQuery(renderEnrichPrompt(locale, req.Items))
 	if err != nil {
 		h.logger.Error("Enrich tags API error", map[string]interface{}{
@@ -131,10 +141,10 @@ func fallbackEnrichResponse(items []EnrichItem) EnrichResponse {
 	results := make([]EnrichResultItem, 0, len(items))
 	for _, item := range items {
 		results = append(results, EnrichResultItem{
-			AssetID:           item.AssetID,
-			EnrichedTags:      normalizeTagList(item.RawTags),
-			SensitiveTypes:    []string{},
-			SearchDescription: buildFallbackSearchDescription(item.RawTags, item.OCRSnippet),
+			AssetID:        item.AssetID,
+			Tags:           normalizeTagList(item.RawTags),
+			SensitiveTypes: []string{},
+			SearchText:     buildFallbackSearchText(item.RawTags, item.OCRSnippet),
 		})
 	}
 	return EnrichResponse{Items: results}
@@ -164,20 +174,23 @@ func normalizeEnrichResponse(raw map[string]interface{}, requested []EnrichItem)
 		}
 		seen[assetID] = struct{}{}
 		input := byID[assetID]
-		enriched := mergeTagLists(input.RawTags, interfaceToStringSlice(obj["enrichedTags"]))
+		enriched := mergeTagLists(
+			input.RawTags,
+			interfaceToStringSlice(obj["tags"]),
+		)
 		sensitive := filterSensitiveTypes(interfaceToStringSlice(obj["sensitiveTypes"]))
 		for _, s := range sensitive {
 			enriched = mergeTagLists(enriched, []string{s})
 		}
-		description := strings.TrimSpace(stringFromInterface(obj["searchDescription"]))
-		if description == "" {
-			description = buildFallbackSearchDescription(input.RawTags, input.OCRSnippet)
+		searchText := strings.TrimSpace(stringFromInterface(obj["searchText"]))
+		if searchText == "" {
+			searchText = buildFallbackSearchText(input.RawTags, input.OCRSnippet)
 		}
 		results = append(results, EnrichResultItem{
-			AssetID:           assetID,
-			EnrichedTags:      enriched,
-			SensitiveTypes:    sensitive,
-			SearchDescription: description,
+			AssetID:        assetID,
+			Tags:           enriched,
+			SensitiveTypes: sensitive,
+			SearchText:     searchText,
 		})
 	}
 
@@ -186,10 +199,10 @@ func normalizeEnrichResponse(raw map[string]interface{}, requested []EnrichItem)
 			continue
 		}
 		results = append(results, EnrichResultItem{
-			AssetID:           item.AssetID,
-			EnrichedTags:      normalizeTagList(item.RawTags),
-			SensitiveTypes:    []string{},
-			SearchDescription: buildFallbackSearchDescription(item.RawTags, item.OCRSnippet),
+			AssetID:        item.AssetID,
+			Tags:           normalizeTagList(item.RawTags),
+			SensitiveTypes: []string{},
+			SearchText:     buildFallbackSearchText(item.RawTags, item.OCRSnippet),
 		})
 	}
 
@@ -211,14 +224,8 @@ func stringFromInterface(value interface{}) string {
 	return ""
 }
 
-func buildFallbackSearchDescription(rawTags []string, ocrSnippet string) string {
-	parts := make([]string, 0, len(rawTags)+1)
-	parts = append(parts, rawTags...)
-	ocr := strings.TrimSpace(ocrSnippet)
-	if ocr != "" {
-		parts = append(parts, ocr)
-	}
-	return strings.Join(parts, " ")
+func buildFallbackSearchText(rawTags []string, ocrSnippet string) string {
+	return strings.TrimSpace(ocrSnippet)
 }
 
 func interfaceToStringSlice(value interface{}) []string {

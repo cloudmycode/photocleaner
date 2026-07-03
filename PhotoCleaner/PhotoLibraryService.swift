@@ -87,6 +87,7 @@ private struct HomeLibrarySummary: Codable {
     let largeVideoCount: Int
     let screenRecordingCount: Int
     let duplicateCandidateCount: Int
+    let burstCandidateCount: Int?
     let mediaStorageBytes: Int64
     let videoStorageBytes: Int64
     let screenshotStorageBytes: Int64
@@ -94,6 +95,7 @@ private struct HomeLibrarySummary: Codable {
     let largeVideoStorageBytes: Int64
     let screenRecordingStorageBytes: Int64
     let duplicateCandidateStorageBytes: Int64
+    let burstCandidateStorageBytes: Int64?
     let emptyAlbumCount: Int
 }
 
@@ -159,7 +161,10 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     @Published private(set) var monthlyReviewedIDs: [String: Set<String>] = [:]
     @Published private(set) var monthlyMarkedIDs: [String: Set<String>] = [:]
     @Published private(set) var duplicateGroups: [SimilarAssetGroup] = []
+    @Published private(set) var burstGroups: [SimilarAssetGroup] = []
     @Published private(set) var duplicateScanProgress: (current: Int, total: Int)?
+    @Published private(set) var isLoadingBurstGroups = false
+    @Published private(set) var hasLoadedBurstGroups = false
     @Published private(set) var hasDuplicateScanResults = false
     @Published private(set) var scanState: ScanState = .idle
     @Published private(set) var analysisCacheSize: Int64 = 0
@@ -171,12 +176,14 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     @Published private(set) var screenRecordingCount = 0
     @Published private(set) var livePhotoCount = 0
     @Published private(set) var duplicateCandidateCount = 0
+    @Published private(set) var burstCandidateCount = 0
     @Published private(set) var videoStorageBytes: Int64 = 0
     @Published private(set) var screenshotStorageBytes: Int64 = 0
     @Published private(set) var livePhotoStorageBytes: Int64 = 0
     @Published private(set) var largeVideoStorageBytes: Int64 = 0
     @Published private(set) var screenRecordingStorageBytes: Int64 = 0
     @Published private(set) var duplicateCandidateStorageBytes: Int64 = 0
+    @Published private(set) var burstCandidateStorageBytes: Int64 = 0
     @Published private(set) var emptyAlbumCount = 0
     @Published private(set) var emptyAlbums: [(id: String, title: String)] = []
     @Published private(set) var monthlyProgress: [String: Double] = [:]
@@ -192,15 +199,21 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     private let monthlyReviewStore = MonthlyReviewStore()
     private let monthlyAlbumsCache = MonthlyAlbumsCache()
     private let detailGroupCache = DetailGroupCache()
+    private let monthlyReminderService = MonthlyReminderService.shared
     private var scanTask: Task<Void, Never>?
     private var libraryChangeDebounce: Task<Void, Never>?
+    // 应用内主动删除后，短时间内跳过一次由相册变更触发的整体刷新，
+    // 避免重复/连拍详情页因整体重建而出现“空列表→重新加载”的闪烁。
+    private var suppressLibraryRefreshUntil: Date?
     private var hasRequestedStartupScan = false
     private var hasScheduledDetailGroupWarmup = false
     private var isRestoringCachedDuplicates = false
+    private var isRestoringCachedBursts = false
     private var didAttemptCachedDuplicateRestore = false
     private var isRestoringMediaAssets = false
     private var isRestoringEmptyAlbums = false
     private var isRestoringMonthlyReviewProgress = false
+    private var isRefreshingMonthlyGroupsLightweight = false
     private var didRestoreMonthlyAlbumsFromCache = false
     private var shouldRepairCachedMediaStorage = false
 
@@ -239,6 +252,8 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 if shouldRepairCachedMediaStorage {
                     shouldRepairCachedMediaStorage = false
                     refreshLibrary()
+                } else {
+                    refreshMonthlyGroupsLightweight()
                 }
                 return
             }
@@ -254,6 +269,8 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             let hasAccess = authorizationStatus == .authorized || authorizationStatus == .limited
             if !hadAccess, hasAccess, !hasHomeSummary {
                 start()
+            } else if hasAccess, hasCompletedInitialAnalysis {
+                refreshMonthlyGroupsLightweight()
             }
         }
     }
@@ -296,7 +313,42 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 self.monthGroups = groups
                 self.restoreMonthlyReviewProgressIfNeeded()
                 self.rebuildAllMonthlyProgress()
+                self.reconcileMonthlyReminder()
             }
+        }
+    }
+
+    func refreshMonthlyGroupsLightweight() {
+        guard hasCompletedInitialAnalysis,
+              authorizationStatus == .authorized || authorizationStatus == .limited,
+              scanState != .loadingLibrary,
+              !isRefreshingMonthlyGroupsLightweight else {
+            return
+        }
+        isRefreshingMonthlyGroupsLightweight = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            let snapshot = await Task.detached(priority: .utility) {
+                let imageAssets = Self.fetchImageAssets()
+                let storageByID = Self.storageMap(for: imageAssets)
+                let groups = Self.makeMonthGroups(
+                    from: imageAssets,
+                    storageByID: storageByID
+                )
+                return (imageAssetsCount: imageAssets.count, groups: groups)
+            }.value
+            guard !Task.isCancelled else {
+                isRefreshingMonthlyGroupsLightweight = false
+                return
+            }
+
+            photoCount = snapshot.imageAssetsCount
+            monthGroups = snapshot.groups
+            persistMonthlyAlbums(from: monthGroups)
+            await restoreMonthlyReviewProgress()
+            reconcileMonthlyReminder()
+            isRefreshingMonthlyGroupsLightweight = false
         }
     }
 
@@ -345,6 +397,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         largeVideoCount = summary.largeVideoCount
         screenRecordingCount = summary.screenRecordingCount
         duplicateCandidateCount = summary.duplicateCandidateCount
+        burstCandidateCount = summary.burstCandidateCount ?? 0
         mediaStorageBytes = summary.mediaStorageBytes
         videoStorageBytes = summary.videoStorageBytes
         screenshotStorageBytes = summary.screenshotStorageBytes
@@ -352,6 +405,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         largeVideoStorageBytes = summary.largeVideoStorageBytes
         screenRecordingStorageBytes = summary.screenRecordingStorageBytes
         duplicateCandidateStorageBytes = summary.duplicateCandidateStorageBytes
+        burstCandidateStorageBytes = summary.burstCandidateStorageBytes ?? 0
         emptyAlbumCount = summary.emptyAlbumCount
         hasHomeSummary = true
         isUsingCachedHomeSummary = true
@@ -373,6 +427,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             largeVideoCount: largeVideoCount,
             screenRecordingCount: screenRecordingCount,
             duplicateCandidateCount: duplicateCandidateCount,
+            burstCandidateCount: burstCandidateCount,
             mediaStorageBytes: mediaStorageBytes,
             videoStorageBytes: videoStorageBytes,
             screenshotStorageBytes: screenshotStorageBytes,
@@ -380,6 +435,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             largeVideoStorageBytes: largeVideoStorageBytes,
             screenRecordingStorageBytes: screenRecordingStorageBytes,
             duplicateCandidateStorageBytes: duplicateCandidateStorageBytes,
+            burstCandidateStorageBytes: burstCandidateStorageBytes,
             emptyAlbumCount: emptyAlbumCount
         )
         guard let data = try? JSONEncoder().encode(summary) else { return }
@@ -393,6 +449,10 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             guard let self else { return }
             scanState = .loadingLibrary
             didAttemptCachedDuplicateRestore = false
+            isLoadingBurstGroups = false
+            hasLoadedBurstGroups = false
+            isRestoringCachedBursts = false
+            burstGroups = []
             if !hasHomeSummary {
                 photoCount = 0
                 videoCount = 0
@@ -401,6 +461,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 largeVideoCount = 0
                 screenRecordingCount = 0
                 duplicateCandidateCount = 0
+                burstCandidateCount = 0
                 mediaStorageBytes = 0
                 videoStorageBytes = 0
                 screenshotStorageBytes = 0
@@ -408,6 +469,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 largeVideoStorageBytes = 0
                 screenRecordingStorageBytes = 0
                 duplicateCandidateStorageBytes = 0
+                burstCandidateStorageBytes = 0
                 emptyAlbumCount = 0
                 emptyAlbums = []
             }
@@ -449,6 +511,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             startSearchOCRIndexing(for: snapshot.imageAssets)
 
             await restoreMonthlyReviewProgress()
+            reconcileMonthlyReminder()
             await Task.yield()
 
             let duplicateCacheComplete = await restoreDuplicateGroupsFromCache(
@@ -473,7 +536,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     func requestThumbnail(
         for asset: PHAsset,
         targetSize: CGSize,
-        completion: @escaping (UIImage?) -> Void
+        completion: @escaping @MainActor (UIImage?) -> Void
     ) -> PHImageRequestID {
         let scale = UIScreen.main.scale
         let pixelSize = CGSize(width: targetSize.width * scale, height: targetSize.height * scale)
@@ -490,7 +553,9 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         ) { image, info in
             let cancelled = info?[PHImageCancelledKey] as? Bool ?? false
             if !cancelled {
-                completion(image)
+                Task { @MainActor in
+                    completion(image)
+                }
             }
         }
     }
@@ -590,6 +655,48 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 await persistDuplicateDetailGroups()
             }
             isRestoringCachedDuplicates = false
+        }
+    }
+
+    func loadBurstGroupsIfNeeded() {
+        guard authorizationStatus == .authorized || authorizationStatus == .limited,
+              burstGroups.isEmpty,
+              !hasLoadedBurstGroups,
+              !isLoadingBurstGroups,
+              !isRestoringCachedBursts else {
+            return
+        }
+
+        isLoadingBurstGroups = true
+        isRestoringCachedBursts = true
+        Task { [weak self] in
+            guard let self else { return }
+            let restoredFromDetailCache = await restoreBurstGroupsFromDetailCache()
+            if restoredFromDetailCache {
+                hasLoadedBurstGroups = true
+                isLoadingBurstGroups = false
+                isRestoringCachedBursts = false
+                return
+            }
+
+            let assets = await Task.detached(priority: .userInitiated) {
+                Self.fetchImageAssets()
+            }.value
+            guard !Task.isCancelled else {
+                isLoadingBurstGroups = false
+                isRestoringCachedBursts = false
+                return
+            }
+
+            let groups = await Self.makeBurstGroups(from: assets)
+            applyBurstGroups(groups)
+            hasLoadedBurstGroups = true
+            await persistBurstDetailGroups()
+            analysisCacheSize = await duplicateCache.sizeInBytes() +
+                searchIndexStore.sizeInBytes() +
+                detailGroupCache.sizeInBytes()
+            isLoadingBurstGroups = false
+            isRestoringCachedBursts = false
         }
     }
 
@@ -710,8 +817,29 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         return identifiers
     }
 
-    func convertLivePhotosToStill(with identifiers: Set<String>) async throws {
-        guard !identifiers.isEmpty else { return }
+    private struct LivePhotoConversionResult {
+        let convertedOriginalIDs: Set<String>
+        let createdAssetIDByOriginalID: [String: String]
+    }
+
+    func convertLivePhotosToStill(with identifiers: Set<String>) async throws -> [String: String] {
+        guard !identifiers.isEmpty else { return [:] }
+        let result = try await Task.detached(priority: .userInitiated) {
+            try await Self.performLivePhotoConversion(with: identifiers)
+        }.value
+
+        livePhotoAssets.removeAll { result.convertedOriginalIDs.contains($0.localIdentifier) }
+        livePhotoCount = livePhotoAssets.count
+        livePhotoStorageBytes = livePhotoAssets.reduce(Int64(0)) {
+            $0 + Self.assetStorageBytes($1)
+        }
+        persistHomeSummary()
+        return result.createdAssetIDByOriginalID
+    }
+
+    nonisolated private static func performLivePhotoConversion(
+        with identifiers: Set<String>
+    ) async throws -> LivePhotoConversionResult {
         let fetchResult = PHAsset.fetchAssets(
             withLocalIdentifiers: Array(identifiers),
             options: nil
@@ -722,11 +850,17 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 assets.append(asset)
             }
         }
-        guard !assets.isEmpty else { return }
+        guard !assets.isEmpty else {
+            return LivePhotoConversionResult(
+                convertedOriginalIDs: [],
+                createdAssetIDByOriginalID: [:]
+            )
+        }
 
         var stillImageURLsByID: [String: URL] = [:]
         stillImageURLsByID.reserveCapacity(assets.count)
         let albumIDsByAssetID = Self.userAlbumIDsByAssetID(for: assets)
+        var createdAssetIDByOriginalID: [String: String] = [:]
         do {
             for asset in assets {
                 stillImageURLsByID[asset.localIdentifier] = try await stillImageFileURL(for: asset)
@@ -742,6 +876,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                     request.location = asset.location
                     request.isFavorite = asset.isFavorite
                     if let placeholder = request.placeholderForCreatedAsset {
+                        createdAssetIDByOriginalID[asset.localIdentifier] = placeholder.localIdentifier
                         for albumID in albumIDsByAssetID[asset.localIdentifier, default: []] {
                             createdPlaceholdersByAlbumID[albumID, default: []].append(placeholder)
                         }
@@ -770,16 +905,13 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             try? FileManager.default.removeItem(at: url)
         }
 
-        let convertedIDs = Set(assets.map(\.localIdentifier))
-        livePhotoAssets.removeAll { convertedIDs.contains($0.localIdentifier) }
-        livePhotoCount = livePhotoAssets.count
-        livePhotoStorageBytes = livePhotoAssets.reduce(Int64(0)) {
-            $0 + Self.assetStorageBytes($1)
-        }
-        persistHomeSummary()
+        return LivePhotoConversionResult(
+            convertedOriginalIDs: Set(assets.map(\.localIdentifier)),
+            createdAssetIDByOriginalID: createdAssetIDByOriginalID
+        )
     }
 
-    private func stillImageFileURL(for asset: PHAsset) async throws -> URL {
+    nonisolated private static func stillImageFileURL(for asset: PHAsset) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let options = PHContentEditingInputRequestOptions()
             options.isNetworkAccessAllowed = true
@@ -843,6 +975,180 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         }
     }
 
+    func exportAssetsForSharing(_ assets: [PHAsset]) async throws -> [URL] {
+        guard !assets.isEmpty else { return [] }
+
+        let exportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("share-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: exportDirectory,
+            withIntermediateDirectories: true
+        )
+
+        do {
+            return try await Self.exportAssetsForSharing(assets, to: exportDirectory)
+        } catch {
+            try? FileManager.default.removeItem(at: exportDirectory)
+            throw error
+        }
+    }
+
+    /// 删除重复/连拍详情页中选中的照片，并直接在内存中把对应缩略图从分组里移除，
+    /// 而不是触发整体刷新，避免界面出现“空列表→重新加载”的闪烁。
+    /// 若组内仅剩 1 张，则在当前会话内继续保留该组，避免用户误以为整组都被删除。
+    func deleteSimilarAssets(with identifiers: Set<String>) async throws {
+        guard !identifiers.isEmpty else { return }
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: Array(identifiers), options: nil)
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.deleteAssets(result)
+        }
+        // 抑制紧接着到来的相册变更整体刷新（系统回调有延迟，这里留出时间窗口）
+        suppressLibraryRefreshUntil = Date().addingTimeInterval(3)
+        removeDeletedAssetsFromDetailGroups(identifiers)
+    }
+
+    nonisolated private static func exportAssetsForSharing(
+        _ assets: [PHAsset],
+        to directory: URL
+    ) async throws -> [URL] {
+        var urls: [URL] = []
+        urls.reserveCapacity(assets.count)
+
+        for asset in assets {
+            let fileURL = try await exportShareableFile(for: asset, to: directory)
+            urls.append(fileURL)
+        }
+
+        return urls
+    }
+
+    nonisolated private static func exportShareableFile(
+        for asset: PHAsset,
+        to directory: URL
+    ) async throws -> URL {
+        let resources = PHAssetResource.assetResources(for: asset)
+        guard let resource = preferredShareResource(from: resources) else {
+            throw NSError(
+                domain: "PhotoCleaner.Share",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to prepare this item for sharing."]
+            )
+        }
+
+        let filename = shareFilename(for: resource)
+        let targetURL = directory.appendingPathComponent(filename)
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHAssetResourceManager.default().writeData(
+                for: resource,
+                toFile: targetURL,
+                options: options
+            ) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+
+        return targetURL
+    }
+
+    nonisolated private static func preferredShareResource(
+        from resources: [PHAssetResource]
+    ) -> PHAssetResource? {
+        let preferredTypes: [PHAssetResourceType] = [
+            .fullSizePhoto,
+            .photo,
+            .fullSizeVideo,
+            .video,
+            .alternatePhoto,
+            .audio
+        ]
+
+        for type in preferredTypes {
+            if let resource = resources.first(where: { $0.type == type }) {
+                return resource
+            }
+        }
+
+        return resources.first
+    }
+
+    nonisolated private static func shareFilename(for resource: PHAssetResource) -> String {
+        let originalName = resource.originalFilename.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !originalName.isEmpty {
+            return "\(UUID().uuidString)-\(originalName)"
+        }
+
+        return "\(UUID().uuidString)"
+    }
+
+    private func removeDeletedAssetsFromDetailGroups(_ identifiers: Set<String>) {
+        let duplicateResult = Self.pruneDetailGroups(duplicateGroups, removing: identifiers)
+        if duplicateResult.didChange {
+            applyDuplicateGroups(duplicateResult.groups)
+            Task { await persistDuplicateDetailGroups() }
+        }
+
+        let burstResult = Self.pruneDetailGroups(burstGroups, removing: identifiers)
+        if burstResult.didChange {
+            applyBurstGroups(burstResult.groups)
+            Task { await persistBurstDetailGroups() }
+        }
+    }
+
+    private static func pruneDetailGroups(
+        _ groups: [SimilarAssetGroup],
+        removing identifiers: Set<String>
+    ) -> (groups: [SimilarAssetGroup], didChange: Bool) {
+        var didChange = false
+        var result: [SimilarAssetGroup] = []
+        result.reserveCapacity(groups.count)
+
+        for group in groups {
+            let remaining = group.assets.filter { !identifiers.contains($0.id) }
+            if remaining.count == group.assets.count {
+                result.append(group)
+                continue
+            }
+
+            didChange = true
+            if remaining.contains(where: { $0.isBest }) {
+                result.append(
+                    SimilarAssetGroup(
+                        id: group.id,
+                        assets: remaining,
+                        creationDate: group.creationDate
+                    )
+                )
+            } else {
+                // 最佳照片被删除后，选取质量分最高者作为新的最佳
+                let bestID = remaining.max { $0.qualityScore < $1.qualityScore }?.id
+                let rebuilt = remaining.map { asset in
+                    SimilarAsset(
+                        id: asset.id,
+                        asset: asset.asset,
+                        qualityScore: asset.qualityScore,
+                        isBest: asset.id == bestID
+                    )
+                }
+                result.append(
+                    SimilarAssetGroup(
+                        id: group.id,
+                        assets: rebuilt,
+                        creationDate: group.creationDate
+                    )
+                )
+            }
+        }
+
+        return (result, didChange)
+    }
+
     func setFavorite(_ isFavorite: Bool, for asset: PHAsset) async throws {
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetChangeRequest(for: asset)
@@ -893,6 +1199,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         monthlyMarkedIDs[monthID] = markedIDs
         persistMonthlyReviewProgress()
         rebuildMonthlyProgress(for: monthID)
+        reconcileMonthlyReminder()
     }
 
     func resetMonthlyReview(for monthID: String) {
@@ -900,6 +1207,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         monthlyMarkedIDs.removeValue(forKey: monthID)
         rebuildMonthlyProgress(for: monthID)
         persistMonthlyReviewProgress()
+        reconcileMonthlyReminder()
     }
 
     private func rebuildMonthlyProgress(for monthID: String) {
@@ -929,10 +1237,23 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         monthlyReviewedCounts = counts
     }
 
+    private func reconcileMonthlyReminder() {
+        monthlyReminderService.reconcile(
+            monthGroups: monthGroups,
+            reviewedCounts: monthlyReviewedCounts
+        )
+    }
+
     func clearAnalysisCache() {
         scanTask?.cancel()
         hasScheduledDetailGroupWarmup = false
         didAttemptCachedDuplicateRestore = false
+        isLoadingBurstGroups = false
+        hasLoadedBurstGroups = false
+        isRestoringCachedBursts = false
+        burstGroups = []
+        burstCandidateCount = 0
+        burstCandidateStorageBytes = 0
         hasCompletedInitialAnalysis = false
         UserDefaults.standard.removeObject(forKey: Self.initialAnalysisCompleteKey)
         UserDefaults.standard.removeObject(forKey: Self.mediaStorageRepairKey)
@@ -985,8 +1306,8 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         hasScheduledDetailGroupWarmup = true
         Task(priority: .utility) { [weak self] in
             guard let self else { return }
-            let hasCachedGroups = await detailGroupCache.hasAnyCachedGroups()
-            guard !hasCachedGroups else { return }
+            let hasCachedDuplicateGroups = await detailGroupCache.hasCachedDuplicateGroups()
+            guard !hasCachedDuplicateGroups else { return }
 
             let assets = Self.fetchImageAssets()
             _ = await restoreDuplicateGroupsFromCache(
@@ -1257,12 +1578,12 @@ final class PhotoLibraryService: NSObject, ObservableObject {
 
             do {
                 let results = try await TagEnrichmentClient.enrich(payloads: payloads)
-                let updates = results.compactMap { result -> (PHAsset, [String], [String], String)? in
+                let updates = results.compactMap { result -> (asset: PHAsset, tags: [String], sensitiveTypes: [String], searchText: String)? in
                     guard let asset = batch.first(where: { $0.localIdentifier == result.assetId }) else {
                         return nil
                     }
-                    let description = result.searchDescription ?? ""
-                    return (asset, result.enrichedTags, result.sensitiveTypes, description)
+                    let searchText = result.searchText ?? ""
+                    return (asset: asset, tags: result.tags, sensitiveTypes: result.sensitiveTypes, searchText: searchText)
                 }
                 try? await PhotoSearchIndexStore.shared.updateEnrichedAnalyses(updates)
             } catch {
@@ -1671,6 +1992,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         monthlyReviewedIDs = reconciledReviewed
         monthlyMarkedIDs = reconciledMarked
         rebuildAllMonthlyProgress()
+        reconcileMonthlyReminder()
         try? await monthlyReviewStore.save(monthlyReviewStates())
     }
 
@@ -1754,6 +2076,17 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         return groups.count == cachedGroups.count
     }
 
+    private func restoreBurstGroupsFromDetailCache(
+        updateSummaryCounts: Bool = true
+    ) async -> Bool {
+        let cachedGroups = await detailGroupCache.loadBurstGroups()
+        guard !cachedGroups.isEmpty else { return false }
+        let groups = Self.restoreDetailGroups(from: cachedGroups)
+        guard !groups.isEmpty else { return false }
+        applyBurstGroups(groups, updateSummaryCounts: updateSummaryCounts)
+        return groups.count == cachedGroups.count
+    }
+
     private func scanDuplicates(in assets: [PHAsset]) async {
         duplicateScanProgress = (0, assets.count)
         var activeCache: [String: CachedPhotoFingerprint] = [:]
@@ -1770,7 +2103,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
                 signature: signature
             ) {
                 fingerprint = cached
-            } else if let image = await requestFingerprintImage(for: asset) {
+            } else if let image = await Self.requestFingerprintImage(for: asset) {
                 fingerprint = await Task.detached(priority: .utility) {
                     Self.duplicateFingerprint(for: image)
                 }.value
@@ -1806,7 +2139,15 @@ final class PhotoLibraryService: NSObject, ObservableObject {
     }
 
     private func persistDuplicateDetailGroups() async {
-        try? await detailGroupCache.saveDuplicateGroups(duplicateGroups)
+        try? await detailGroupCache.saveDuplicateGroups(
+            duplicateGroups.filter { $0.assets.count >= 2 }
+        )
+    }
+
+    private func persistBurstDetailGroups() async {
+        try? await detailGroupCache.saveBurstGroups(
+            burstGroups.filter { $0.assets.count >= 2 }
+        )
     }
 
     private func applyDuplicateGroups(
@@ -1819,6 +2160,28 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             duplicateCandidateStorageBytes = Self.cleanableStorageBytes(in: groups)
         }
         hasDuplicateScanResults = true
+    }
+
+    private func applyBurstGroups(
+        _ groups: [SimilarAssetGroup],
+        updateSummaryCounts: Bool = true
+    ) {
+        let sorted = groups.sorted {
+            ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast)
+        }
+        burstGroups = sorted
+        guard updateSummaryCounts else { return }
+        burstCandidateCount = Self.cleanableCount(in: sorted)
+        persistHomeSummary()
+        // 读取候选资源大小较重，放后台计算，避免阻塞主线程刷新
+        Task { [weak self] in
+            let bytes = await Task.detached(priority: .utility) {
+                Self.cleanableStorageBytes(in: sorted)
+            }.value
+            guard let self, self.burstGroups.map(\.id) == sorted.map(\.id) else { return }
+            self.burstCandidateStorageBytes = bytes
+            self.persistHomeSummary()
+        }
     }
 
     nonisolated private static func makeDuplicateGroups(
@@ -1862,7 +2225,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         }
     }
 
-    private func requestFingerprintImage(for asset: PHAsset) async -> CGImage? {
+    nonisolated private static func requestFingerprintImage(for asset: PHAsset) async -> CGImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
@@ -1870,7 +2233,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             options.isNetworkAccessAllowed = false
 
             var resumed = false
-            imageManager.requestImage(
+            PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: CGSize(width: 64, height: 64),
                 contentMode: .aspectFill,
@@ -2237,6 +2600,197 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         )
     }
 
+    nonisolated private static func makeBurstGroups(from assets: [PHAsset]) async -> [SimilarAssetGroup] {
+        let explicitGroups = explicitBurstCandidateGroups(from: assets)
+        let explicitAssetIDs = Set(
+            explicitGroups.flatMap { $0.map(\.localIdentifier) }
+        )
+        let fallbackGroups = await visuallySimilarContinuousShotGroups(
+            from: assets.filter { !explicitAssetIDs.contains($0.localIdentifier) },
+            maximumAdjacentInterval: 2.5,
+            maximumSequenceDuration: 20,
+            maximumHashDistance: 16
+        )
+
+        return (explicitGroups + fallbackGroups)
+            .map(Self.makeBurstGroup)
+            .sorted {
+            ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast)
+        }
+    }
+
+    nonisolated private static func makeBurstGroup(_ assets: [PHAsset]) -> SimilarAssetGroup {
+        let sorted = assets.sorted(by: assetDateAscending)
+        let keepID = sorted.first(where: \.isFavorite)?.localIdentifier ??
+            sorted.max(by: { qualityScore(forMetadata: $0) < qualityScore(forMetadata: $1) })?
+                .localIdentifier
+        let results = sorted.map {
+            SimilarAsset(
+                id: $0.localIdentifier,
+                asset: $0,
+                qualityScore: qualityScore(forMetadata: $0),
+                isBest: $0.localIdentifier == keepID
+            )
+        }
+        return SimilarAssetGroup(
+            id: results.map(\.id).sorted().joined(separator: "|"),
+            assets: results,
+            creationDate: sorted.first?.creationDate
+        )
+    }
+
+    nonisolated private static func explicitBurstCandidateGroups(from assets: [PHAsset]) -> [[PHAsset]] {
+        Dictionary(
+            grouping: assets.compactMap { asset -> (String, PHAsset)? in
+                guard let identifier = asset.burstIdentifier else { return nil }
+                return (identifier, asset)
+            },
+            by: \.0
+        )
+        .values
+        .map { $0.map(\.1).sorted(by: assetDateAscending) }
+        .filter { $0.count >= 2 }
+    }
+
+    nonisolated private static func visuallySimilarContinuousShotGroups(
+        from assets: [PHAsset],
+        maximumAdjacentInterval: TimeInterval,
+        maximumSequenceDuration: TimeInterval,
+        maximumHashDistance: Int
+    ) async -> [[PHAsset]] {
+        var fallbackGroups: [[PHAsset]] = []
+        var current: [PHAsset] = []
+        var fingerprints: [String: UInt64] = [:]
+
+        func fingerprint(for asset: PHAsset) async -> UInt64? {
+            if let cached = fingerprints[asset.localIdentifier] {
+                return cached
+            }
+            guard let image = await requestFingerprintImage(for: asset) else {
+                return nil
+            }
+            let fingerprint = visualFingerprint(for: image)
+            fingerprints[asset.localIdentifier] = fingerprint
+            return fingerprint
+        }
+
+        for asset in assets.sorted(by: Self.assetDateAscending) {
+            guard let date = asset.creationDate else {
+                if current.count >= 2 {
+                    fallbackGroups.append(current)
+                }
+                current = []
+                continue
+            }
+            guard let previous = current.last else {
+                current = [asset]
+                continue
+            }
+            let previousDate = current.last?.creationDate
+            let firstDate = current.first?.creationDate
+            let isAdjacent = previousDate.map {
+                date.timeIntervalSince($0) <= maximumAdjacentInterval
+            } ?? false
+            let isShortSequence = firstDate.map {
+                date.timeIntervalSince($0) <= maximumSequenceDuration
+            } ?? false
+            let hasMatchingShape = current.last.map {
+                Self.aspectBucket(for: $0) == Self.aspectBucket(for: asset)
+            } ?? false
+            let hasMatchingVisuals: Bool
+            if isAdjacent,
+               isShortSequence,
+               hasMatchingShape,
+               let assetFingerprint = await fingerprint(for: asset) {
+                let previousFingerprint = await fingerprint(for: previous)
+                let firstFingerprint: UInt64?
+                if let firstAsset = current.first {
+                    if let cached = fingerprints[firstAsset.localIdentifier] {
+                        firstFingerprint = cached
+                    } else {
+                        firstFingerprint = await fingerprint(for: firstAsset)
+                    }
+                } else {
+                    firstFingerprint = nil
+                }
+                let distanceToPrevious = previousFingerprint.map {
+                    Self.hammingDistance($0, assetFingerprint)
+                }
+                let distanceToFirst = firstFingerprint.map {
+                    Self.hammingDistance($0, assetFingerprint)
+                }
+                let minimumDistance = [distanceToPrevious, distanceToFirst]
+                    .compactMap { $0 }
+                    .min()
+                hasMatchingVisuals = minimumDistance.map { $0 <= maximumHashDistance } ?? false
+            } else {
+                hasMatchingVisuals = false
+            }
+
+            if isAdjacent && isShortSequence && hasMatchingShape && hasMatchingVisuals {
+                current.append(asset)
+            } else {
+                if current.count >= 2 {
+                    fallbackGroups.append(current)
+                }
+                current = [asset]
+            }
+        }
+        if current.count >= 2 {
+            fallbackGroups.append(current)
+        }
+
+        return fallbackGroups.sorted {
+            ($0.first?.creationDate ?? .distantPast) <
+                ($1.first?.creationDate ?? .distantPast)
+        }
+    }
+
+    nonisolated private static func assetDateAscending(
+        _ left: PHAsset,
+        _ right: PHAsset
+    ) -> Bool {
+        (left.creationDate ?? .distantPast) <
+            (right.creationDate ?? .distantPast)
+    }
+
+    nonisolated private static func qualityScore(forMetadata asset: PHAsset) -> Double {
+        let pixelCount = max(asset.pixelWidth * asset.pixelHeight, 1)
+        let resolution = log2(Double(pixelCount)) / 30
+        let favoriteBonus = asset.isFavorite ? 0.2 : 0
+        return resolution + favoriteBonus
+    }
+
+    nonisolated private static func visualFingerprint(for image: CGImage) -> UInt64 {
+        let width = 8
+        let height = 8
+        var pixels = [UInt8](repeating: 0, count: width * height)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else {
+            return 0
+        }
+        context.interpolationQuality = .low
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let average = pixels.reduce(0) { $0 + Int($1) } / pixels.count
+        return pixels.enumerated().reduce(UInt64(0)) { fingerprint, item in
+            item.element >= average
+                ? fingerprint | (UInt64(1) << UInt64(item.offset))
+                : fingerprint
+        }
+    }
+
+    nonisolated private static func hammingDistance(_ left: UInt64, _ right: UInt64) -> Int {
+        (left ^ right).nonzeroBitCount
+    }
+
     nonisolated private static func restoreDetailGroups(
         from cachedGroups: [CachedDetailGroup]
     ) -> [SimilarAssetGroup] {
@@ -2313,6 +2867,14 @@ extension PhotoLibraryService: PHPhotoLibraryChangeObserver {
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            if let until = self.suppressLibraryRefreshUntil {
+                if Date() < until {
+                    // 本次变更由应用内删除引起，且已在内存中直接处理，跳过整体刷新
+                    // 不清空时间窗口，以便覆盖系统可能发出的多次变更回调
+                    return
+                }
+                self.suppressLibraryRefreshUntil = nil
+            }
             self.libraryChangeDebounce?.cancel()
             self.libraryChangeDebounce = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -2330,6 +2892,8 @@ struct PhotoThumbnailView: View {
 
     @State private var image: UIImage?
     @State private var requestID: PHImageRequestID?
+    @State private var retryTask: Task<Void, Never>?
+    @State private var retryCount = 0
 
     var body: some View {
         ZStack {
@@ -2367,6 +2931,8 @@ struct PhotoThumbnailView: View {
                 library.cancelImageRequest(requestID)
                 self.requestID = nil
             }
+            retryTask?.cancel()
+            retryTask = nil
         }
     }
 
@@ -2375,9 +2941,31 @@ struct PhotoThumbnailView: View {
             library.cancelImageRequest(requestID)
             self.requestID = nil
         }
+        retryTask?.cancel()
+        retryTask = nil
+        retryCount = 0
         image = nil
+        requestThumbnail()
+    }
+
+    private func requestThumbnail() {
+        if let requestID {
+            library.cancelImageRequest(requestID)
+            self.requestID = nil
+        }
         requestID = library.requestThumbnail(for: asset, targetSize: targetSize) {
-            image = $0
+            if let thumbnail = $0 {
+                image = thumbnail
+            } else {
+                guard retryCount < 2 else { return }
+                retryCount += 1
+                retryTask?.cancel()
+                retryTask = Task {
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                    guard !Task.isCancelled else { return }
+                    requestThumbnail()
+                }
+            }
         }
     }
 }

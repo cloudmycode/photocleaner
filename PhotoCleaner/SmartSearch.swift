@@ -57,10 +57,8 @@ struct SearchFilters: Decodable {
 }
 
 struct SearchMust: Decodable {
-    var visualTagGroups: [[String]]?
-    var sensitiveTypes: [String]?
-    var ocrContainsAll: [String]?
-    var searchKeywordGroups: [[String]]?
+    var tagGroups: [[String]]? = nil
+    var textGroups: [[String]]? = nil
 }
 
 struct SearchDateRange: Decodable {
@@ -92,17 +90,17 @@ enum SmartSearchClient {
             throw SmartSearchError.configurationMissing
         }
 
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = normalizedTransportQuery(query)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 60
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(RequestBody(
             query: trimmed,
-            locale: Locale.current.identifier,
+            locale: normalizedLocaleIdentifier(),
             appVersion: SmartSearchConfig.appVersion,
             buildVersion: SmartSearchConfig.buildVersion,
-            availableTags: Array(availableTags.prefix(availableTagsLimit)),
+            availableTags: normalizedAvailableTags(availableTags),
             sign: md5Sign(trimmed + SmartSearchConfig.secret)
         ))
 
@@ -126,6 +124,30 @@ enum SmartSearchClient {
     private static func md5Sign(_ raw: String) -> String {
         Insecure.MD5.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
     }
+
+    private static func normalizedTransportQuery(_ query: String) -> String {
+        query
+            .replacingOccurrences(of: "\u{3000}", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    private static func normalizedLocaleIdentifier() -> String {
+        let identifier = Locale.autoupdatingCurrent.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        return identifier.isEmpty ? "und" : identifier
+    }
+
+    private static func normalizedAvailableTags(_ availableTags: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for tag in availableTags {
+            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
+            normalized.append(trimmed)
+            if normalized.count >= availableTagsLimit { break }
+        }
+        return normalized
+    }
 }
 
 // MARK: - Tag Enrichment
@@ -143,9 +165,9 @@ enum TagEnrichmentClient {
 
     struct ResultItem: Decodable {
         let assetId: String
-        let enrichedTags: [String]
+        let tags: [String]
         let sensitiveTypes: [String]
-        let searchDescription: String?
+        let searchText: String?
     }
 
     static func enrich(payloads: [Payload]) async throws -> [ResultItem] {
@@ -202,10 +224,10 @@ enum TagEnrichmentClient {
 enum SmartSearchService {
     static func search(query: String) async throws -> [PHAsset] {
         let store = PhotoSearchIndexStore.shared
-        let availableTags = await store.topVisualTags(limit: SmartSearchClient.availableTagsLimit)
-        let plan = SmartSearchQueryParser.enrichPlan(
-            try await SmartSearchClient.fetchPlan(query: query, availableTags: availableTags),
-            originalQuery: query
+        let availableTags = await store.topVisualTags()
+        let plan = try await SmartSearchClient.fetchPlan(
+            query: query,
+            availableTags: availableTags
         )
         let index = await store.searchIndex()
 
@@ -219,8 +241,7 @@ enum SmartSearchService {
         let matched = SearchEngine.match(
             plan: plan,
             entries: entries,
-            tagPostings: index.tagPostings,
-            sensitivePostings: index.sensitivePostings
+            tagPostings: index.tagPostings
         )
         let matchedIDs = Set(matched.map(\.id))
         return assets.filter { matchedIDs.contains($0.localIdentifier) }
