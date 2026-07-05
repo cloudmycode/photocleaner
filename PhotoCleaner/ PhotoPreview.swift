@@ -1357,8 +1357,7 @@ private struct MonthAssetRow: View {
                         Text(
                             String.localizedStringWithFormat(
                                 L("month.progress.format"),
-                                reviewedCount,
-                                group.assets.count
+                                reviewedCount
                             )
                         )
                         .font(.caption2)
@@ -3659,6 +3658,8 @@ struct SmartPhotoSearchView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
+                pageHeader
+
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.footnote)
@@ -3734,51 +3735,82 @@ struct SmartPhotoSearchView: View {
         }
     }
 
+    private var pageHeader: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text(L("tab.smart.search"))
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.primary)
+
+            Text("smart.search.alpha.badge")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Color.cleanerBlue)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.cleanerBlue.opacity(0.12), in: Capsule())
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+    }
+
     @ViewBuilder
     private var resultsContent: some View {
-        CleanerSection(title: resultsTitle) {
-            if isSearching {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("smart.search.searching")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 28)
-            } else if results.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "photo.stack")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(Color.cleanerBlue)
-                    Text(submittedQuery.isEmpty ? "smart.search.empty.idle" : "smart.search.empty.results")
-                        .font(.subheadline.weight(.semibold))
-                    Text("smart.search.empty.description")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 42)
-            } else {
-                SmartSearchResultsGrid(
-                    results: results,
-                    storageLabels: resultStorageLabels,
-                    selectedIDs: selectedResultIDs,
-                    onToggleSelection: toggleSelection,
-                    onPreview: { asset in
-                        dismissSearchKeyboard()
-                        previewAsset = IdentifiablePHAsset(asset: asset)
-                    }
-                )
-                .equatable()
-                .padding(.horizontal, 2)
-                .padding(.bottom, 20)
+        if isSearching {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("smart.search.searching")
+                    .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+        } else if results.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "photo.stack")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(Color.cleanerBlue)
+                Text(submittedQuery.isEmpty ? "smart.search.empty.idle" : "smart.search.empty.results")
+                    .font(.subheadline.weight(.semibold))
+                Text("smart.search.empty.description")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 42)
+        } else {
+            SmartSearchResultsGrid(
+                results: results,
+                storageLabels: resultStorageLabels,
+                selectedIDs: selectedResultIDs,
+                onToggleSelection: toggleSelection,
+                onPreview: { asset in
+                    dismissSearchKeyboard()
+                    previewAsset = IdentifiablePHAsset(asset: asset)
+                }
+            )
+            .equatable()
+            .padding(.horizontal, 2)
+            .padding(.bottom, 20)
         }
     }
 
     private var searchInputBar: some View {
         VStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Text("smart.search.alpha.badge")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.cleanerBlue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.cleanerBlue.opacity(0.12), in: Capsule())
+
+                Text("smart.search.alpha.description")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if speech.isRecording {
                 Text("smart.search.listening")
                     .font(.caption)
@@ -3797,6 +3829,8 @@ struct SmartPhotoSearchView: View {
             }
 
             HStack(spacing: 10) {
+                holdToSpeakButton
+
                 TextField("smart.search.placeholder", text: $queryText)
                     .textFieldStyle(.plain)
                     .lineLimit(1)
@@ -3814,8 +3848,6 @@ struct SmartPhotoSearchView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.cleanerBorder, lineWidth: 1)
                     }
-
-                holdToSpeakButton
             }
         }
         .padding(.horizontal, 14)
@@ -3854,10 +3886,10 @@ struct SmartPhotoSearchView: View {
                     Text("Share")
                         .font(.subheadline.weight(.semibold))
                 }
-                .foregroundStyle(Color.cleanerBlue)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .frame(height: 42)
-                .background(Color.cleanerBlue.opacity(0.12), in: Capsule())
+                .background(Color.cleanerBlue, in: Capsule())
             }
             .buttonStyle(.plain)
             .disabled(isPreparingShare)
@@ -3885,23 +3917,17 @@ struct SmartPhotoSearchView: View {
         results.filter { selectedResultIDs.contains($0.localIdentifier) }
     }
 
-    private var resultsTitle: String {
-        if results.isEmpty {
-            return L("smart.search.results")
-        }
-        return String.localizedStringWithFormat(
-            L("smart.search.results.format"),
-            results.count
-        )
-    }
-
     private var holdToSpeakButton: some View {
         Button {} label: {
             Image(systemName: speech.isRecording ? "waveform" : "mic.fill")
                 .font(.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(speech.isRecording ? .white : Color.cleanerBlue)
                 .frame(width: 46, height: 46)
-                .background(speech.isRecording ? Color.red : Color.cleanerBlue, in: RoundedRectangle(cornerRadius: 8))
+                .background(speech.isRecording ? Color.red : Color.white, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(Color.cleanerBorder, lineWidth: speech.isRecording ? 0 : 1)
+                }
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
@@ -4350,7 +4376,7 @@ struct SettingsView: View {
                         .padding(.vertical, 14)
                 }
 
-                Text("Smart Cleaner\n2026")
+                Text("Tidy It\n2026")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -4990,7 +5016,7 @@ private struct SettingsGroup<Content: View>: View {
                 .padding(.horizontal, 8)
             VStack(spacing: 0) {
                 content
-                    .toggleStyle(SwitchToggleStyle(tint: .cleanerGreen))
+                    .toggleStyle(SwitchToggleStyle(tint: .cleanerBlue))
             }
             .background(.white, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.cleanerBorder))

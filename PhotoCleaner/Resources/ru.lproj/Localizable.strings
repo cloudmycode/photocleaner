@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "Быстрая очистка";
 "tab.albums" = "Альбомы";
 "tab.compress" = "Очистка видео";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "Проведите пальцем вниз, чтобы удалить";
 "month.review.guide.accessibility" = "Проведите пальцем вверх, чтобы сохранить, проведите вниз, чтобы удалить";
 "cancel" = "Отмена";
-"month.progress.format" = "%d из %d проверено";
+"month.progress.format" = "Проверено %d";
 "month.progress.complete" = "Завершить";
 "video.reset.zoom" = "Сбросить масштаб видео";
 "photo.reset.zoom" = "Сбросить масштаб фото";

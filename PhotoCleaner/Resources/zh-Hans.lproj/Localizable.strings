@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "快速清理";
 "tab.albums" = "月度相册";
 "tab.compress" = "视频清理";
@@ -157,7 +157,7 @@
 "month.review.guide.swipe.down" = "向下滑动删除";
 "month.review.guide.accessibility" = "上划保留，下划标记删除";
 "cancel" = "取消";
-"month.progress.format" = "已处理 %d/%d";
+"month.progress.format" = "已处理 %d";
 "month.progress.complete" = "已完成";
 "video.reset.zoom" = "还原视频缩放";
 "photo.reset.zoom" = "还原照片缩放";
@@ -181,7 +181,9 @@
 "monthly.reminder.body.format" = "%@ 的照片已经整理好时间线了，现在可以快速过一遍。";
 "tab.smart.search" = "智能找图";
 "smart.search.prompt" = "说出你想找的照片条件";
-"smart.search.placeholder" = "例如：找出去年去海南玩的图";
+"smart.search.placeholder" = "例如：car、passport、去年在海南的猫";
+"smart.search.alpha.badge" = "Alpha";
+"smart.search.alpha.description" = "仍在测试中，结果可能不完整。只会用文字做理解，图片始终保留在本地。";
 "smart.search.hold.to.speak" = "按住说话";
 "smart.search.listening" = "正在听你说话，松手后开始理解";
 "smart.search.searching" = "正在找图…";
@@ -194,7 +196,7 @@
 "smart.search.searching" = "正在筛选本地相册";
 "smart.search.empty.idle" = "输入文字或按住麦克风开始";
 "smart.search.empty.results" = "没有找到匹配照片";
-"smart.search.empty.description" = "云端只解析文字，照片仍在本地筛选。";
+"smart.search.empty.description" = "图片不会上云，始终保留在本地。没有找到时，试试更短的关键词，或改用英文名词。";
 "smart.search.network.title" = "无法理解搜索条件";
 "smart.search.network.unavailable" = "网络不可用，暂时无法使用云端语义解析。";
 "smart.search.type.image" = "照片";

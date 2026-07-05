@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "빠른 청소";
 "tab.albums" = "앨범";
 "tab.compress" = "비디오 정리";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "삭제하려면 아래로 스와이프하세요.";
 "month.review.guide.accessibility" = "유지하려면 위로 스와이프하고, 삭제하려면 아래로 스와이프하세요.";
 "cancel" = "취소";
-"month.progress.format" = "%d 중 %d이(가) 검토됨";
+"month.progress.format" = "%d개 검토됨";
 "month.progress.complete" = "완료";
 "video.reset.zoom" = "비디오 줌 재설정";
 "photo.reset.zoom" = "사진 확대/축소 재설정";

@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "Bersih Cepat";
 "tab.albums" = "Album";
 "tab.compress" = "Pembersihan Video";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "Geser ke bawah untuk menghapus";
 "month.review.guide.accessibility" = "Geser ke atas untuk menyimpan, geser ke bawah untuk menghapus";
 "cancel" = "Batalkan";
-"month.progress.format" = "%d dari %d ditinjau";
+"month.progress.format" = "%d ditinjau";
 "month.progress.complete" = "Lengkap";
 "video.reset.zoom" = "Setel ulang zoom video";
 "photo.reset.zoom" = "Setel ulang zoom foto";

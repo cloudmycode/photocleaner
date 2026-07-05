@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "Utqaylla Pichay";
 "tab.albums" = "Álbumkuna";
 "tab.compress" = "Video Pichay";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "Urayman llalliy borranaykipaq";
 "month.review.guide.accessibility" = "Wichayman llalliy waqaychaypaq, urayman llalliy qulluchinaykipaq";
 "cancel" = "Cancelar";
-"month.progress.format" = "%d de %d qhawarisqa";
+"month.progress.format" = "%d qhawarisqa";
 "month.progress.complete" = "Completo";
 "video.reset.zoom" = "Video hatunyachiyta musuqmanta churay";
 "photo.reset.zoom" = "Fotokuna hatunyachiyta musuqmanta churay";

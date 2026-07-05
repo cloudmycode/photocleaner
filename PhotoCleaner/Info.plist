@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Smart Cleaner</string>
+	<string>Tidy It</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -22,14 +22,14 @@
 	<string>26</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Smart Cleaner may save compressed videos back to your library.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Smart Cleaner needs photo library access to find duplicate and similar media.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Smart Cleaner needs microphone access so you can search photos by voice.</string>
+	<string>Tidy It needs microphone access so you can search photos by voice.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Tidy It may save compressed videos back to your library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Tidy It needs photo library access to find duplicate and similar media.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Smart Cleaner uses speech recognition to turn your voice into photo search text.</string>
+	<string>Tidy It uses speech recognition to turn your voice into photo search text.</string>
 	<key>SmartSearchEndpoint</key>
 	<string>https://cleaner.digsaw.cc/smart-search</string>
 	<key>SmartSearchSecret</key>

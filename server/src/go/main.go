@@ -106,12 +106,27 @@ func replaceAll(s, old, new string) string {
 }
 
 // renderPromptInternal 内部实现
-func renderPromptInternal(query, locale, currentDate string, availableTags []string) string {
+func renderPromptInternal(
+	query, locale, currentDate string,
+	availableTags []string,
+	availableTextHints []string,
+) string {
 	tagsJSON, _ := json.Marshal(availableTags)
+	textHintsJSON, _ := json.Marshal(availableTextHints)
 	t := PromptTemplate
 	t = replaceAll(t, "{query}", query)
 	t = replaceAll(t, "{locale}", locale)
 	t = replaceAll(t, "{current_date}", currentDate)
+	t = replaceAll(t, "{available_tags}", string(tagsJSON))
+	t = replaceAll(t, "{available_text_hints}", string(textHintsJSON))
+	return t
+}
+
+func renderSemanticTagFallbackPrompt(query, locale string, availableTags []string) string {
+	tagsJSON, _ := json.Marshal(availableTags)
+	t := SemanticTagFallbackPromptTemplate
+	t = replaceAll(t, "{query}", query)
+	t = replaceAll(t, "{locale}", locale)
 	t = replaceAll(t, "{available_tags}", string(tagsJSON))
 	return t
 }

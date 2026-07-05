@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "تمیز کردن سریع";
 "tab.albums" = "آلبوم ها";
 "tab.compress" = "پاکسازی ویدیو";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "برای حذف، انگشت خود را به پایین بکشید";
 "month.review.guide.accessibility" = "Swipe up to keep, swipe down to delete";
 "cancel" = "لغو کنید";
-"month.progress.format" = "%d of %d reviewed";
+"month.progress.format" = "%d بررسی‌شده";
 "month.progress.complete" = "کامل";
 "video.reset.zoom" = "بازنشانی بزرگنمایی ویدیو";
 "photo.reset.zoom" = "بازنشانی بزرگنمایی عکس";

@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "Làm sạch nhanh";
 "tab.albums" = "Album";
 "tab.compress" = "Dọn dẹp video";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "Vuốt xuống để xóa";
 "month.review.guide.accessibility" = "Vuốt lên để giữ, vuốt xuống để xóa";
 "cancel" = "Hủy bỏ";
-"month.progress.format" = "%d trong số %d đã đánh giá";
+"month.progress.format" = "Đã xem %d";
 "month.progress.complete" = "Hoàn thành";
 "video.reset.zoom" = "Đặt lại thu phóng video";
 "photo.reset.zoom" = "Đặt lại thu phóng ảnh";

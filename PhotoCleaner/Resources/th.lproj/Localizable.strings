@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "ทำความสะอาดด่วน";
 "tab.albums" = "อัลบั้ม";
 "tab.compress" = "การล้างข้อมูลวิดีโอ";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "ปัดลงเพื่อลบ";
 "month.review.guide.accessibility" = "ปัดขึ้นเพื่อเก็บ ปัดลงเพื่อลบ";
 "cancel" = "ยกเลิก";
-"month.progress.format" = "%d จาก %d ตรวจสอบแล้ว";
+"month.progress.format" = "ตรวจสอบแล้ว %d";
 "month.progress.complete" = "เสร็จสมบูรณ์";
 "video.reset.zoom" = "รีเซ็ตการซูมวิดีโอ";
 "photo.reset.zoom" = "รีเซ็ตการซูมภาพ";

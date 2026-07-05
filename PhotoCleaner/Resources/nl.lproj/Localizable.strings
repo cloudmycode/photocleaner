@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "Snel schoon";
 "tab.albums" = "Albums";
 "tab.compress" = "Video-opruiming";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "Veeg omlaag om te verwijderen";
 "month.review.guide.accessibility" = "Veeg omhoog om te behouden, veeg omlaag om te verwijderen";
 "cancel" = "Annuleer";
-"month.progress.format" = "%d van %d beoordeeld";
+"month.progress.format" = "%d beoordeeld";
 "month.progress.complete" = "Compleet";
 "video.reset.zoom" = "Videozoom opnieuw instellen";
 "photo.reset.zoom" = "Fotozoom opnieuw instellen";

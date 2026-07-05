@@ -84,8 +84,13 @@ enum SmartSearchError: Error {
 
 enum SmartSearchClient {
     static let availableTagsLimit = 1000
+    static let availableTextHintsLimit = 400
 
-    static func fetchPlan(query: String, availableTags: [String]) async throws -> SearchPlan {
+    static func fetchPlan(
+        query: String,
+        availableTags: [String],
+        availableTextHints: [String]
+    ) async throws -> SearchPlan {
         guard let url = SmartSearchConfig.endpoint, !SmartSearchConfig.secret.isEmpty else {
             throw SmartSearchError.configurationMissing
         }
@@ -101,6 +106,7 @@ enum SmartSearchClient {
             appVersion: SmartSearchConfig.appVersion,
             buildVersion: SmartSearchConfig.buildVersion,
             availableTags: normalizedAvailableTags(availableTags),
+            availableTextHints: normalizedAvailableTextHints(availableTextHints),
             sign: md5Sign(trimmed + SmartSearchConfig.secret)
         ))
 
@@ -118,6 +124,7 @@ enum SmartSearchClient {
         let appVersion: String
         let buildVersion: String
         let availableTags: [String]
+        let availableTextHints: [String]
         let sign: String
     }
 
@@ -145,6 +152,25 @@ enum SmartSearchClient {
             guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
             normalized.append(trimmed)
             if normalized.count >= availableTagsLimit { break }
+        }
+        return normalized
+    }
+
+    private static func normalizedAvailableTextHints(_ hints: [String]) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for hint in hints {
+            let trimmed = hint
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\u{3000}", with: " ")
+                .split(whereSeparator: \.isWhitespace)
+                .joined(separator: " ")
+            guard !trimmed.isEmpty else { continue }
+
+            let dedupeKey = trimmed.lowercased()
+            guard seen.insert(dedupeKey).inserted else { continue }
+            normalized.append(trimmed)
+            if normalized.count >= availableTextHintsLimit { break }
         }
         return normalized
     }
@@ -225,9 +251,11 @@ enum SmartSearchService {
     static func search(query: String) async throws -> [PHAsset] {
         let store = PhotoSearchIndexStore.shared
         let availableTags = await store.topVisualTags()
+        let availableTextHints = await store.topSearchTextHints()
         let plan = try await SmartSearchClient.fetchPlan(
             query: query,
-            availableTags: availableTags
+            availableTags: availableTags,
+            availableTextHints: availableTextHints
         )
         let index = await store.searchIndex()
 

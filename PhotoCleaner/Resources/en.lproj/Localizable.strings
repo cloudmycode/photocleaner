@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "Quick Clean";
 "tab.albums" = "Albums";
 "tab.compress" = "Video Cleanup";
@@ -157,7 +157,7 @@
 "month.review.guide.swipe.down" = "Swipe down to delete";
 "month.review.guide.accessibility" = "Swipe up to keep, swipe down to delete";
 "cancel" = "Cancel";
-"month.progress.format" = "%d of %d reviewed";
+"month.progress.format" = "%d reviewed";
 "month.progress.complete" = "Complete";
 "video.reset.zoom" = "Reset video zoom";
 "photo.reset.zoom" = "Reset photo zoom";
@@ -181,7 +181,9 @@
 "monthly.reminder.body.format" = "Your %@ photos can be organized now. Take a quick pass through them.";
 "tab.smart.search" = "Smart Search";
 "smart.search.prompt" = "Describe the photos you want to find";
-"smart.search.placeholder" = "Example: find photos from last year in Hainan";
+"smart.search.placeholder" = "Try: car, passport, cats in Hainan last year";
+"smart.search.alpha.badge" = "ALPHA";
+"smart.search.alpha.description" = "Results may be incomplete. Only your text is used for understanding, and your photos stay on this device.";
 "smart.search.hold.to.speak" = "Hold to speak";
 "smart.search.listening" = "Listening. Release to understand.";
 "smart.search.searching" = "Searching…";
@@ -194,7 +196,7 @@
 "smart.search.searching" = "Filtering your local library";
 "smart.search.empty.idle" = "Type or hold the microphone to start";
 "smart.search.empty.results" = "No matching photos found";
-"smart.search.empty.description" = "Cloud parsing only receives your text. Photos are filtered locally.";
+"smart.search.empty.description" = "Photos never leave this device. If nothing matches, try a shorter query or an English keyword.";
 "smart.search.network.title" = "Unable to Understand";
 "smart.search.network.unavailable" = "Network unavailable. Cloud semantic parsing cannot be used right now.";
 "smart.search.type.image" = "Photos";

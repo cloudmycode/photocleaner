@@ -301,6 +301,33 @@ actor PhotoSearchIndexStore {
             .map(\.key)
     }
 
+    /// 本机可检索文本候选摘要，供服务端按语义选择 textGroups。
+    func topSearchTextHints(limit: Int = 400) -> [String] {
+        loadIfNeeded()
+        guard limit > 0, let entries else { return [] }
+
+        var frequencies: [String: Int] = [:]
+        for entry in entries.values {
+            for hint in Set(Self.searchTextHints(for: entry)) {
+                frequencies[hint, default: 0] += 1
+            }
+        }
+
+        return frequencies.keys.sorted {
+            let leftCount = frequencies[$0] ?? 0
+            let rightCount = frequencies[$1] ?? 0
+            if leftCount != rightCount {
+                return leftCount > rightCount
+            }
+            if $0.count != $1.count {
+                return $0.count < $1.count
+            }
+            return $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+        .prefix(limit)
+        .map { $0 }
+    }
+
     func exportDebugSnapshot(for assets: [PHAsset]) throws -> URL {
         loadIfNeeded()
 
@@ -669,6 +696,72 @@ actor PhotoSearchIndexStore {
             String(asset.mediaType.rawValue),
             String(asset.mediaSubtypes.rawValue)
         ].joined(separator: ":")
+    }
+
+    private static func searchTextHints(for entry: PhotoSearchIndexEntry) -> [String] {
+        var hints: [String] = []
+
+        func append(_ raw: String?) {
+            guard let normalized = normalizedHint(raw) else { return }
+            hints.append(normalized)
+        }
+
+        append(entry.idCardName)
+        append(entry.idCardNumber)
+
+        for segment in splitHintSegments(entry.searchText) {
+            append(segment)
+            for token in textHintTokens(in: segment) {
+                append(token)
+            }
+        }
+
+        for token in textHintTokens(in: entry.searchableOCRText) {
+            append(token)
+        }
+
+        return uniqueHintsPreservingOrder(hints)
+    }
+
+    private static func splitHintSegments(_ text: String?) -> [String] {
+        guard let text else { return [] }
+        return text
+            .components(separatedBy: CharacterSet(charactersIn: "\n,.;:!?，。；：！？()[]{}"))
+            .compactMap { normalizedHint($0) }
+            .filter { (2...80).contains($0.count) }
+    }
+
+    private static func textHintTokens(in text: String) -> [String] {
+        guard !text.isEmpty else { return [] }
+        let pattern = #"[A-Za-z0-9][A-Za-z0-9._:/\-]{2,}|[\p{Han}]{2,12}|[\p{Hiragana}\p{Katakana}]{2,12}|[\p{Hangul}]{2,12}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.matches(in: text, range: range).compactMap { match in
+            guard let swiftRange = Range(match.range, in: text) else { return nil }
+            return normalizedHint(String(text[swiftRange]))
+        }
+    }
+
+    private static func normalizedHint(_ raw: String?) -> String? {
+        let trimmed = raw?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\u{3000}", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ") ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private static func uniqueHintsPreservingOrder(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        result.reserveCapacity(values.count)
+        for value in values {
+            let key = value.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            result.append(value)
+        }
+        return result
     }
 
     private static func storageBytes(for asset: PHAsset) -> Int64 {

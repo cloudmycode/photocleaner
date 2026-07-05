@@ -1,4 +1,4 @@
-"app.name" = "Smart Cleaner";
+"app.name" = "Tidy It";
 "tab.quick" = "Curățare rapidă";
 "tab.albums" = "Albume";
 "tab.compress" = "Curățare video";
@@ -153,7 +153,7 @@
 "month.review.guide.swipe.down" = "Glisați în jos pentru a șterge";
 "month.review.guide.accessibility" = "Glisați în sus pentru a păstra, glisați în jos pentru a șterge";
 "cancel" = "Anulează";
-"month.progress.format" = "%d din %d au fost examinate";
+"month.progress.format" = "%d examinate";
 "month.progress.complete" = "Complet";
 "video.reset.zoom" = "Resetați zoomul video";
 "photo.reset.zoom" = "Resetați zoomul fotografiei";

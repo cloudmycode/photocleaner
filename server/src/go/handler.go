@@ -10,12 +10,13 @@ import (
 
 // Request 请求结构
 type Request struct {
-	Query         string   `json:"query"`
-	Locale        string   `json:"locale"`
-	AppVersion    string   `json:"appVersion"`
-	BuildVersion  string   `json:"buildVersion"`
-	AvailableTags []string `json:"availableTags"`
-	Sign          string   `json:"sign"`
+	Query              string   `json:"query"`
+	Locale             string   `json:"locale"`
+	AppVersion         string   `json:"appVersion"`
+	BuildVersion       string   `json:"buildVersion"`
+	AvailableTags      []string `json:"availableTags"`
+	AvailableTextHints []string `json:"availableTextHints"`
+	Sign               string   `json:"sign"`
 }
 
 // SmartSearchHandler 智能搜索处理器
@@ -98,17 +99,24 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 
 	// 记录客户端提交上来的原始数据（sign 不记录，避免泄露签名）
 	h.logger.Info("Received search request", map[string]interface{}{
-		"query":        query,
-		"locale":       locale,
-		"appVersion":   req.AppVersion,
-		"buildVersion": req.BuildVersion,
-		"tagCount":     len(req.AvailableTags),
-		"tags":         req.AvailableTags,
+		"query":         query,
+		"locale":        locale,
+		"appVersion":    req.AppVersion,
+		"buildVersion":  req.BuildVersion,
+		"tagCount":      len(req.AvailableTags),
+		"textHintCount": len(req.AvailableTextHints),
+		"tags":          req.AvailableTags,
 	})
 
 	currentDate := time.Now().Format("2006-01-02")
 
-	raw, err := h.client.ParseQuery(renderPromptInternal(query, locale, currentDate, req.AvailableTags))
+	raw, err := h.client.ParseQuery(renderPromptInternal(
+		query,
+		locale,
+		currentDate,
+		req.AvailableTags,
+		req.AvailableTextHints,
+	))
 	if err != nil {
 		h.logger.Error("DeepSeek API error", map[string]interface{}{
 			"query": query,
@@ -119,6 +127,7 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 	}
 
 	plan := normalizeSearchPlan(raw, query, req.AvailableTags, h.config)
+	h.applySemanticTagFallbackIfNeeded(&plan, query, locale, req.AvailableTags)
 	plan.Must.TagGroups = filterTagGroupsInAvailable(plan.Must.TagGroups, req.AvailableTags)
 	plan.Must = ensureMustArrays(plan.Must)
 
@@ -133,6 +142,66 @@ func (h *SmartSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request
 	})
 
 	h.writeJSON(w, http.StatusOK, plan)
+}
+
+func (h *SmartSearchHandler) applySemanticTagFallbackIfNeeded(
+	plan *SearchPlan,
+	query string,
+	locale string,
+	availableTags []string,
+) {
+	if !shouldAttemptSemanticTagFallback(*plan, query, availableTags) {
+		return
+	}
+
+	raw, err := h.client.ParseQuery(renderSemanticTagFallbackPrompt(query, locale, availableTags))
+	if err != nil {
+		h.logger.Error("Semantic tag fallback failed", map[string]interface{}{
+			"query": query,
+			"error": err.Error(),
+		})
+		return
+	}
+
+	fallbackGroups := normalizeKeywordGroups(stringMatrixField(raw, "tagGroups"))
+	fallbackGroups = filterTagGroupsInAvailable(fallbackGroups, availableTags)
+	if len(fallbackGroups) == 0 {
+		return
+	}
+
+	plan.Must.TagGroups = append(plan.Must.TagGroups, fallbackGroups...)
+	plan.Must.TagGroups = normalizeKeywordGroups(plan.Must.TagGroups)
+
+	h.logger.Info("Semantic tag fallback applied", map[string]interface{}{
+		"query":              query,
+		"fallbackTagGroups":  fallbackGroups,
+		"existingTextGroups": plan.Must.TextGroups,
+	})
+}
+
+func shouldAttemptSemanticTagFallback(plan SearchPlan, query string, availableTags []string) bool {
+	if len(availableTags) == 0 || len(plan.Must.TagGroups) > 0 || hasAnyFilter(plan.Filters) {
+		return false
+	}
+
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" || len([]rune(trimmed)) > 24 {
+		return false
+	}
+
+	lower := strings.ToLower(trimmed)
+	if strings.ContainsAny(lower, "@#:/\\") {
+		return false
+	}
+	if hasLettersAndDigits(lower) {
+		return false
+	}
+	for _, marker := range []string{"password", "账号", "账户", "wifi", "ssid", "型号", "model"} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 // writeJSON 写入 JSON 响应
