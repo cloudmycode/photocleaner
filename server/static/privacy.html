@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="index, follow" />
+  <title>Privacy Policy - Tidy It</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --text: #1c1c1e;
+      --muted: #6b7280;
+      --accent: #2f6fed;
+      --border: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 26px; margin: 0; }
+    .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px 26px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    h2 {
+      font-size: 19px;
+      margin: 30px 0 10px;
+      padding-top: 6px;
+    }
+    h2:first-of-type { margin-top: 8px; }
+    p, li { font-size: 15px; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 6px; }
+    a { color: var(--accent); }
+    .lang-toggle {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      background: var(--card);
+    }
+    .lang-toggle button {
+      border: 0;
+      background: transparent;
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .lang-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .muted-note {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 28px;
+    }
+    [data-lang] { display: none; }
+    [data-lang].active { display: block; }
+    .highlight {
+      background: #eef4ff;
+      border: 1px solid #d6e3ff;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin: 14px 0;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Privacy Policy</h1>
+        <div class="sub">Tidy It</div>
+      </div>
+      <div class="lang-toggle" role="group" aria-label="Language">
+        <button id="btn-en" class="active" onclick="setLang('en')">English</button>
+        <button id="btn-zh" onclick="setLang('zh')">简体中文</button>
+      </div>
+    </header>
+
+    <div class="card">
+      <!-- ===================== ENGLISH ===================== -->
+      <section data-lang="en" class="active">
+        <p class="sub"><strong>Effective date:</strong> July 6, 2026</p>
+
+        <p>
+          This Privacy Policy explains how <strong>Tidy It</strong>
+          ("the App", "we", "us") handles your information. The App is a local
+          photo cleanup, organization, and smart-search utility for iPhone.
+          We built it to be privacy-first.
+        </p>
+
+        <div class="highlight">
+          <strong>The short version:</strong> Your photos and videos never leave your
+          device. We do not require an account, and we do not sell your data.
+        </div>
+
+        <h2>1. Information We Do NOT Collect</h2>
+        <ul>
+          <li>We do <strong>not</strong> upload, transmit, or store your photos or videos on our servers.</li>
+          <li>We do <strong>not</strong> require you to create an account or provide your name, email, or phone number to use the App.</li>
+          <li>We do <strong>not</strong> collect contacts, location history, or advertising identifiers.</li>
+        </ul>
+
+        <h2>2. Information Processed On Your Device</h2>
+        <p>
+          Photo cleanup and organization (finding duplicates, similar photos, burst
+          shots, screenshots, large videos, month-by-month review, etc.) are performed
+          <strong>entirely on your device</strong>. Image analysis and on-device text
+          recognition (OCR) used to build the local search index also run on your device.
+          This information stays on your device and is not sent to us.
+        </p>
+
+        <h2>3. Information Sent to Our Server (Smart Search)</h2>
+        <p>
+          Smart Search (labeled "Alpha") is the only feature that communicates with our
+          server (<code>cleaner.digsaw.cc</code>). To interpret your query and improve
+          matching, the App may send the following <strong>text-only</strong> data:
+        </p>
+        <ul>
+          <li>The <strong>search text</strong> you type or dictate.</li>
+          <li>Short <strong>text snippets and tags derived from your photos</strong> on your device — for example on-device generated tags and brief OCR text extracted from images — used to enrich the local search index.</li>
+          <li>A randomly generated <strong>device identifier</strong> used only to sign and rate-limit requests.</li>
+          <li>Technical data such as app version, build number, and language/locale.</li>
+        </ul>
+        <p class="muted-note">
+          Because text extracted from images (OCR) may contain personal information visible
+          in your photos, please avoid using Smart Search on highly sensitive images if you
+          are not comfortable with this text being processed to power search.
+        </p>
+
+        <h2>4. Third-Party Processing</h2>
+        <p>
+          To understand natural-language queries and enrich tags, the text described in
+          Section 3 is processed by a third-party large language model provider
+          (<strong>DeepSeek</strong>). Only text is shared with this provider — never your
+          photos or videos. Their handling of data is governed by their own privacy terms.
+        </p>
+
+        <h2>5. Server Logs & Retention</h2>
+        <p>
+          Our server keeps operational logs (including the text data described in Section 3)
+          for debugging, abuse prevention, and quality improvement. Logs are rotated and
+          automatically deleted on a rolling basis. We do not use this data to build
+          advertising or marketing profiles.
+        </p>
+
+        <h2>6. Permissions We Request</h2>
+        <ul>
+          <li><strong>Photo Library:</strong> to analyze, review, and organize your photos and videos for cleanup.</li>
+          <li><strong>Add to Photo Library:</strong> only when saving results you approve back to your library.</li>
+          <li><strong>Microphone:</strong> only for voice input when you search by voice.</li>
+          <li><strong>Speech Recognition:</strong> only to convert your voice into search text.</li>
+        </ul>
+
+        <h2>7. Children's Privacy</h2>
+        <p>
+          The App is not directed to children under 13, and we do not knowingly collect
+          personal information from children.
+        </p>
+
+        <h2>8. Data Security</h2>
+        <p>
+          Data transmitted to our server is encrypted in transit using HTTPS (TLS). Because
+          the App processes photos locally, most of your sensitive content never leaves your
+          device.
+        </p>
+
+        <h2>9. Your Rights</h2>
+        <p>
+          Since Smart Search is anonymous and tied only to a random device identifier, we
+          are generally unable to associate stored logs with a specific person. You can stop
+          all server communication at any time by not using Smart Search. You may also
+          uninstall the App to remove all locally stored data.
+        </p>
+
+        <h2>10. Changes to This Policy</h2>
+        <p>
+          We may update this Privacy Policy from time to time. Material changes will be
+          reflected by updating the "Effective date" above.
+        </p>
+
+        <h2>11. Contact Us</h2>
+        <p>
+          If you have questions about this Privacy Policy, contact us at
+          <a href="mailto:bjyqd2018@gmail.com">bjyqd2018@gmail.com</a>.
+        </p>
+      </section>
+
+      <!-- ===================== 简体中文 ===================== -->
+      <section data-lang="zh">
+        <p class="sub"><strong>生效日期：</strong>2026 年 7 月 6 日</p>
+
+        <p>
+          本隐私政策说明 <strong>Tidy It</strong>
+          （以下称“本应用”“我们”）如何处理你的信息。本应用是一款用于 iPhone
+          的本地相册清理、整理与智能搜索工具，我们以隐私优先为设计原则。
+        </p>
+
+        <div class="highlight">
+          <strong>核心一句话：</strong>你的照片和视频始终不会离开你的设备。使用本应用无需注册账号，我们也不会出售你的数据。
+        </div>
+
+        <h2>1. 我们不会收集的信息</h2>
+        <ul>
+          <li>我们<strong>不会</strong>将你的照片或视频上传、传输或存储到我们的服务器。</li>
+          <li>使用本应用<strong>无需</strong>注册账号，也无需提供姓名、邮箱或手机号。</li>
+          <li>我们<strong>不会</strong>收集通讯录、位置历史或广告标识符。</li>
+        </ul>
+
+        <h2>2. 在设备端处理的信息</h2>
+        <p>
+          相册清理与整理（识别重复、相似照片、连拍、截图、大视频、按月整理等）<strong>完全在你的设备上完成</strong>。
+          用于构建本地搜索索引的图像分析与端侧文字识别（OCR）也在设备端运行。
+          这些信息保留在你的设备上，不会发送给我们。
+        </p>
+
+        <h2>3. 会发送到我们服务器的信息（智能搜索）</h2>
+        <p>
+          智能搜索（标注为“Alpha”）是唯一会与我们服务器（<code>cleaner.digsaw.cc</code>）通信的功能。
+          为了理解你的搜索意图并提升匹配效果，本应用可能发送以下<strong>仅文本</strong>数据：
+        </p>
+        <ul>
+          <li>你输入或语音输入的<strong>搜索文本</strong>。</li>
+          <li>从你设备照片中<strong>派生出的少量文本片段与标签</strong>——例如端侧生成的标签、从图片中提取的简短 OCR 文本——用于丰富本地搜索索引。</li>
+          <li>随机生成的<strong>设备标识符</strong>，仅用于对请求进行签名与限流。</li>
+          <li>应用版本、构建号、语言/地区等技术信息。</li>
+        </ul>
+        <p class="muted-note">
+          由于从图片中提取的文本（OCR）可能包含照片中可见的个人信息，如果你不希望这些文本被用于智能搜索处理，请避免对高度敏感的图片使用智能搜索。
+        </p>
+
+        <h2>4. 第三方处理</h2>
+        <p>
+          为了理解自然语言查询并扩写标签，第 3 节所述的文本会交由第三方大语言模型服务商
+          （<strong>DeepSeek</strong>）处理。仅有文本会共享给该服务商，绝不包含你的照片或视频。
+          其数据处理受其自身隐私条款约束。
+        </p>
+
+        <h2>5. 服务器日志与保留期</h2>
+        <p>
+          我们的服务器会保存运行日志（包含第 3 节所述文本数据），用于排障、防滥用与质量优化。
+          日志会滚动轮转并自动删除。我们不会将这些数据用于广告或营销画像。
+        </p>
+
+        <h2>6. 我们申请的权限</h2>
+        <ul>
+          <li><strong>相册（照片库）：</strong>用于分析、查看和整理你的照片与视频以进行清理。</li>
+          <li><strong>添加到相册：</strong>仅在将你确认的结果保存回相册时使用。</li>
+          <li><strong>麦克风：</strong>仅在你使用语音搜索时用于语音输入。</li>
+          <li><strong>语音识别：</strong>仅用于将你的语音转换为搜索文本。</li>
+        </ul>
+
+        <h2>7. 儿童隐私</h2>
+        <p>
+          本应用并非面向 13 岁以下儿童，我们也不会有意收集儿童的个人信息。
+        </p>
+
+        <h2>8. 数据安全</h2>
+        <p>
+          传输到我们服务器的数据通过 HTTPS（TLS）加密。由于本应用在本地处理照片，你的大部分敏感内容始终不会离开设备。
+        </p>
+
+        <h2>9. 你的权利</h2>
+        <p>
+          由于智能搜索是匿名的，仅与随机设备标识符关联，我们通常无法将存储的日志与具体个人对应。
+          你可以随时通过不使用智能搜索来停止所有服务器通信；也可以卸载本应用以清除所有本地存储的数据。
+        </p>
+
+        <h2>10. 政策变更</h2>
+        <p>
+          我们可能会不时更新本隐私政策。重大变更将通过更新上方“生效日期”予以体现。
+        </p>
+
+        <h2>11. 联系我们</h2>
+        <p>
+          如对本隐私政策有任何疑问，请通过
+          <a href="mailto:bjyqd2018@gmail.com">bjyqd2018@gmail.com</a> 与我们联系。
+        </p>
+      </section>
+    </div>
+
+    <footer>
+      &copy; 2026 Tidy It. All rights reserved.
+    </footer>
+  </div>
+
+  <script>
+    function setLang(lang) {
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-lang]').forEach(function (el) {
+        el.classList.toggle('active', el.getAttribute('data-lang') === lang);
+      });
+      document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+      document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+    }
+    (function () {
+      var pref = (navigator.language || 'en').toLowerCase();
+      if (pref.indexOf('zh') === 0) setLang('zh');
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Tidy It - a privacy-first iPhone photo cleaner. Clean duplicates, free up storage, review photos month by month, and find pictures with private smart search." />
+  <title>Tidy It - Clean Photos & Free Storage</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-soft: #f4f7fb;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2f6fed;
+      --accent-2: #16b6a6;
+      --border: #e6eaf0;
+      --card: #ffffff;
+      --radius: 18px;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 22px; }
+
+    /* ---------- Nav ---------- */
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(255,255,255,0.8);
+      backdrop-filter: saturate(180%) blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+    .logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid; place-items: center; color: #fff; font-size: 18px;
+      box-shadow: 0 4px 12px rgba(47,111,237,.35);
+    }
+    .nav-links { display: flex; align-items: center; gap: 26px; }
+    .nav-links a { color: var(--muted); font-size: 15px; }
+    .nav-links a:hover { color: var(--text); }
+    .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+    .lang-toggle button { border: 0; background: transparent; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--muted); }
+    .lang-toggle button.active { background: var(--accent); color: #fff; }
+    .nav-links .hide-sm { }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      background: radial-gradient(1200px 500px at 80% -10%, #e8f0ff 0%, rgba(232,240,255,0) 60%),
+                  radial-gradient(900px 500px at 0% 0%, #e6faf6 0%, rgba(230,250,246,0) 55%);
+      padding: 72px 0 40px;
+    }
+    .hero-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 40px; align-items: center; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #fff; border: 1px solid var(--border);
+      color: var(--accent); font-weight: 600; font-size: 13px;
+      padding: 6px 12px; border-radius: 999px; box-shadow: var(--shadow);
+    }
+    .hero h1 { font-size: 48px; line-height: 1.1; margin: 18px 0 14px; letter-spacing: -0.02em; }
+    .hero h1 .grad { background: linear-gradient(120deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero p.lead { font-size: 18px; color: var(--muted); margin: 0 0 26px; max-width: 520px; }
+    .cta-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 13px 22px; border-radius: 12px; font-weight: 600; font-size: 15px;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .btn-primary { background: #0f172a; color: #fff; box-shadow: var(--shadow); }
+    .btn-primary:hover { transform: translateY(-2px); }
+    .btn-ghost { border: 1px solid var(--border); color: var(--text); background: #fff; }
+    .btn-ghost:hover { transform: translateY(-2px); }
+    .trust { display: flex; gap: 26px; margin-top: 30px; flex-wrap: wrap; }
+    .trust div span { display: block; }
+    .trust .num { font-size: 22px; font-weight: 700; }
+    .trust .lbl { font-size: 13px; color: var(--muted); }
+
+    /* ---------- Phone mockup ---------- */
+    .phone-wrap { display: grid; place-items: center; }
+    .phone {
+      width: 280px; height: 570px; border-radius: 46px;
+      background: #0f172a; padding: 12px;
+      box-shadow: 0 30px 60px rgba(15,23,42,.25);
+      position: relative;
+    }
+    .phone::before {
+      content: ""; position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      width: 120px; height: 26px; background: #0f172a; border-radius: 0 0 16px 16px; z-index: 3;
+    }
+    .screen {
+      width: 100%; height: 100%; border-radius: 36px; overflow: hidden;
+      background: linear-gradient(180deg, #eef4ff 0%, #f4fbfa 100%);
+      display: flex; flex-direction: column;
+    }
+    .screen-head { padding: 46px 20px 12px; }
+    .screen-head .t { font-weight: 700; font-size: 20px; }
+    .screen-head .s { color: var(--muted); font-size: 13px; }
+    .storage-card {
+      margin: 8px 16px; background: #fff; border-radius: 16px; padding: 16px;
+      box-shadow: 0 6px 18px rgba(15,23,42,.06);
+    }
+    .storage-card .row { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+    .bar { height: 8px; background: #e6eaf0; border-radius: 999px; margin: 10px 0 4px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; width: 68%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px 16px; }
+    .tile { background: #fff; border-radius: 14px; padding: 12px; box-shadow: 0 6px 18px rgba(15,23,42,.05); }
+    .tile .ic { font-size: 20px; }
+    .tile .name { font-size: 13px; font-weight: 600; margin-top: 6px; }
+    .tile .meta { font-size: 11px; color: var(--muted); }
+
+    /* ---------- Sections ---------- */
+    section.block { padding: 66px 0; }
+    .section-head { text-align: center; max-width: 640px; margin: 0 auto 44px; }
+    .section-head h2 { font-size: 34px; margin: 0 0 12px; letter-spacing: -0.02em; }
+    .section-head p { color: var(--muted); font-size: 17px; margin: 0; }
+    .eyebrow { color: var(--accent); font-weight: 700; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .feature {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 26px 22px; transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .feature:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+    .feature .fic {
+      width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center;
+      font-size: 22px; background: var(--bg-soft); margin-bottom: 14px;
+    }
+    .feature h3 { margin: 0 0 8px; font-size: 18px; }
+    .feature p { margin: 0; color: var(--muted); font-size: 15px; }
+
+    .alt { background: var(--bg-soft); }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 46px; align-items: center; }
+    .split ul { list-style: none; padding: 0; margin: 18px 0 0; }
+    .split ul li { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; font-size: 15px; }
+    .check { color: var(--accent-2); font-weight: 800; }
+    .badge-alpha { display: inline-block; background: #fff3e0; color: #b26a00; font-weight: 700; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid #ffe0b2; }
+
+    .search-demo { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow); }
+    .search-bar { display: flex; align-items: center; gap: 10px; background: var(--bg-soft); border-radius: 12px; padding: 12px 14px; font-size: 15px; color: var(--muted); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .chip { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; font-size: 13px; }
+
+    .privacy-band { background: linear-gradient(120deg, #0f172a, #14314f); color: #fff; border-radius: 24px; padding: 46px; text-align: center; }
+    .privacy-band h2 { font-size: 30px; margin: 10px 0 12px; }
+    .privacy-band p { color: #cbd5e1; max-width: 620px; margin: 0 auto 20px; font-size: 16px; }
+    .privacy-points { display: flex; justify-content: center; gap: 30px; flex-wrap: wrap; margin-top: 22px; }
+    .privacy-points div { font-size: 14px; color: #e2e8f0; display: flex; align-items: center; gap: 8px; }
+
+    footer { border-top: 1px solid var(--border); padding: 40px 0; margin-top: 20px; }
+    .foot-inner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .foot-links { display: flex; gap: 22px; color: var(--muted); font-size: 14px; }
+    .foot-links a:hover { color: var(--text); }
+    .copyright { color: var(--muted); font-size: 13px; }
+
+    [data-lang] { display: none; }
+    [data-lang].active { display: inline; }
+    .block-lang { display: none; }
+    .block-lang.active { display: block; }
+
+    @media (max-width: 860px) {
+      .hero-grid, .split { grid-template-columns: 1fr; }
+      .features { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 38px; }
+      .phone-wrap { order: -1; }
+      .nav-links .hide-sm { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ===================== NAV ===================== -->
+  <nav>
+    <div class="container nav-inner">
+      <div class="brand">
+        <div class="logo">✦</div>
+        <span>Tidy It</span>
+      </div>
+      <div class="nav-links">
+        <a class="hide-sm" href="#features"><span data-lang="en" class="active">Features</span><span data-lang="zh">功能</span></a>
+        <a class="hide-sm" href="#search"><span data-lang="en" class="active">Smart Search</span><span data-lang="zh">智能搜索</span></a>
+        <a class="hide-sm" href="#privacy"><span data-lang="en" class="active">Privacy</span><span data-lang="zh">隐私</span></a>
+        <div class="lang-toggle" role="group" aria-label="Language">
+          <button id="btn-en" class="active" onclick="setLang('en')">EN</button>
+          <button id="btn-zh" onclick="setLang('zh')">中文</button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="container hero-grid">
+      <div>
+        <span class="pill">🔒 <span data-lang="en" class="active">Privacy-first photo cleaner</span><span data-lang="zh">隐私优先的相册清理工具</span></span>
+        <h1>
+          <span data-lang="en" class="active">Clean your photos.<br><span class="grad">Reclaim your storage.</span></span>
+          <span data-lang="zh">整理你的相册，<br><span class="grad">释放你的空间。</span></span>
+        </h1>
+        <p class="lead">
+          <span data-lang="en" class="active">Tidy It helps you clear duplicates, review photos month by month, and find any picture with private smart search — all without uploading your photos.</span>
+          <span data-lang="zh">Tidy It 帮你清理重复照片、按月整理相册，并用隐私优先的智能搜索快速找到任意图片——全程不上传你的照片。</span>
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#features">
+             <span data-lang="en" class="active">Explore features</span><span data-lang="zh">查看功能</span>
+          </a>
+          <a class="btn btn-ghost" href="privacy.html">
+            <span data-lang="en" class="active">Privacy Policy</span><span data-lang="zh">隐私政策</span>
+          </a>
+        </div>
+        <div class="trust">
+          <div><span class="num">100%</span><span class="lbl"><span data-lang="en" class="active">On-device cleanup</span><span data-lang="zh">端侧清理</span></span></div>
+          <div><span class="num">0</span><span class="lbl"><span data-lang="en" class="active">Photos uploaded</span><span data-lang="zh">照片上传</span></span></div>
+          <div><span class="num">6+</span><span class="lbl"><span data-lang="en" class="active">Cleanup tools</span><span data-lang="zh">清理工具</span></span></div>
+        </div>
+      </div>
+
+      <div class="phone-wrap">
+        <div class="phone">
+          <div class="screen">
+            <div class="screen-head">
+              <div class="t">Tidy It</div>
+              <div class="s"><span data-lang="en" class="active">Free up space today</span><span data-lang="zh">今天就释放空间</span></div>
+            </div>
+            <div class="storage-card">
+              <div class="row"><span><span data-lang="en" class="active">Storage</span><span data-lang="zh">存储空间</span></span><span>42.6 / 64 GB</span></div>
+              <div class="bar"><i></i></div>
+              <div class="row"><span style="color:var(--accent)"><span data-lang="en" class="active">Cleanable</span><span data-lang="zh">可清理</span></span><span style="color:var(--accent);font-weight:700">8.3 GB</span></div>
+            </div>
+            <div class="tiles">
+              <div class="tile"><div class="ic">🧬</div><div class="name"><span data-lang="en" class="active">Duplicates</span><span data-lang="zh">重复照片</span></div><div class="meta">312 items · 1.9 GB</div></div>
+              <div class="tile"><div class="ic">🖼️</div><div class="name"><span data-lang="en" class="active">Screenshots</span><span data-lang="zh">截图</span></div><div class="meta">540 items · 2.1 GB</div></div>
+              <div class="tile"><div class="ic">🎬</div><div class="name"><span data-lang="en" class="active">Large videos</span><span data-lang="zh">大视频</span></div><div class="meta">18 items · 3.4 GB</div></div>
+              <div class="tile"><div class="ic">📸</div><div class="name"><span data-lang="en" class="active">Bursts</span><span data-lang="zh">连拍</span></div><div class="meta">27 groups · 0.9 GB</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================== FEATURES ===================== -->
+  <section class="block" id="features">
+    <div class="container">
+      <div class="section-head">
+        <div class="eyebrow"><span data-lang="en" class="active">Features</span><span data-lang="zh">核心功能</span></div>
+        <h2><span data-lang="en" class="active">Everything you need to tidy up</span><span data-lang="zh">相册整理，一站搞定</span></h2>
+        <p><span data-lang="en" class="active">Guided, safe, and efficient cleanup tools that work directly on your device.</span><span data-lang="zh">引导式、安全、高效的清理工具，全部在设备端运行。</span></p>
+      </div>
+
+      <div class="features">
+        <div class="feature">
+          <div class="fic">🧬</div>
+          <h3><span data-lang="en" class="active">Duplicates & similar</span><span data-lang="zh">重复与相似</span></h3>
+          <p><span data-lang="en" class="active">Find duplicate and look-alike photos, then keep the best shot with confidence.</span><span data-lang="zh">识别重复与相似照片，放心保留最佳一张。</span></p>
+        </div>
+        <div class="feature">
+          <div class="fic">📸</div>
+          <h3><span data-lang="en" class="active">Burst review</span><span data-lang="zh">连拍整理</span></h3>
+          <p><span data-lang="en" class="active">Review burst sequences and remove the ones you don't need in seconds.</span><span data-lang="zh">快速浏览连拍序列，删掉不需要的照片。</span></p>
+        </div>
+        <div class="feature">
+          <div class="fic">🖼️</div>
+          <h3><span data-lang="en" class="active">Screenshots & clutter</span><span data-lang="zh">截图与杂乱</span></h3>
+          <p><span data-lang="en" class="active">Clear out old screenshots, empty albums, and low-quality images.</span><span data-lang="zh">清理旧截图、空相册和低质量图片。</span></p>
+        </div>
+        <div class="feature">
+          <div class="fic">🎬</div>
+          <h3><span data-lang="en" class="active">Video cleanup</span><span data-lang="zh">视频清理</span></h3>
+          <p><span data-lang="en" class="active">Spot large videos taking up the most space and free storage fast.</span><span data-lang="zh">找出占空间最多的大视频，快速释放存储。</span></p>
+        </div>
+        <div class="feature">
+          <div class="fic">🗓️</div>
+          <h3><span data-lang="en" class="active">Month-by-month review</span><span data-lang="zh">按月整理</span></h3>
+          <p><span data-lang="en" class="active">Swipe up to keep, down to remove. Tidy thousands of photos, one month at a time.</span><span data-lang="zh">上划保留、下划删除，按月逐步整理海量照片。</span></p>
+        </div>
+        <div class="feature">
+          <div class="fic">📊</div>
+          <h3><span data-lang="en" class="active">Storage insights</span><span data-lang="zh">空间概览</span></h3>
+          <p><span data-lang="en" class="active">See what's using your storage and how much you can reclaim at a glance.</span><span data-lang="zh">一眼看清空间占用与可释放容量。</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SMART SEARCH ===================== -->
+  <section class="block alt" id="search">
+    <div class="container split">
+      <div>
+        <span class="badge-alpha">ALPHA</span>
+        <div class="eyebrow" style="margin-top:12px"><span data-lang="en" class="active">Smart Search</span><span data-lang="zh">智能搜索</span></div>
+        <h2 style="font-size:32px;margin:8px 0 4px;letter-spacing:-.02em"><span data-lang="en" class="active">Find photos by meaning, text, or voice</span><span data-lang="zh">按语义、文字或语音找图</span></h2>
+        <ul>
+          <li><span class="check">✓</span> <span data-lang="en" class="active">Search with natural language like "car", "receipt", or "ID card".</span><span data-lang="zh">用自然语言搜索，如“汽车”“收据”“身份证”。</span></li>
+          <li><span class="check">✓</span> <span data-lang="en" class="active">Matches photo content, tags, and on-device OCR text.</span><span data-lang="zh">结合图片内容、标签与端侧 OCR 文本匹配。</span></li>
+          <li><span class="check">✓</span> <span data-lang="en" class="active">Multilingual input and voice search supported.</span><span data-lang="zh">支持多语言输入与语音搜索。</span></li>
+          <li><span class="check">✓</span> <span data-lang="en" class="active">Your photos are never uploaded — only text is used to understand your query.</span><span data-lang="zh">照片绝不上传——仅用文本理解你的搜索意图。</span></li>
+        </ul>
+      </div>
+      <div>
+        <div class="search-demo">
+          <div class="search-bar">🔍 <span data-lang="en" class="active">receipt from last month</span><span data-lang="zh">上个月的收据</span></div>
+          <div class="chips">
+            <span class="chip">🚗 car</span>
+            <span class="chip">🧾 receipt</span>
+            <span class="chip">🪪 ID card</span>
+            <span class="chip">🐶 dog</span>
+            <span class="chip">🏔️ mountain</span>
+            <span class="chip">📶 wifi password</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PRIVACY ===================== -->
+  <section class="block" id="privacy">
+    <div class="container">
+      <div class="privacy-band">
+        <div class="eyebrow" style="color:#7dd3fc"><span data-lang="en" class="active">Privacy First</span><span data-lang="zh">隐私优先</span></div>
+        <h2><span data-lang="en" class="active">Your photos stay on your device</span><span data-lang="zh">你的照片始终留在设备中</span></h2>
+        <p><span data-lang="en" class="active">Cleanup and image analysis run locally. We don't require an account, and we never upload your photos or videos to the cloud.</span><span data-lang="zh">清理与图像分析在本地完成。无需注册账号，我们绝不会把你的照片或视频上传到云端。</span></p>
+        <div class="privacy-points">
+          <div>✅ <span data-lang="en" class="active">No photo uploads</span><span data-lang="zh">不上传照片</span></div>
+          <div>✅ <span data-lang="en" class="active">On-device analysis</span><span data-lang="zh">端侧分析</span></div>
+          <div>✅ <span data-lang="en" class="active">No account needed</span><span data-lang="zh">无需账号</span></div>
+        </div>
+        <div style="margin-top:26px">
+          <a class="btn btn-ghost" href="privacy.html" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.3)">
+            <span data-lang="en" class="active">Read our Privacy Policy</span><span data-lang="zh">阅读隐私政策</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer>
+    <div class="container foot-inner">
+      <div class="brand">
+        <div class="logo">✦</div>
+        <span>Tidy It</span>
+      </div>
+      <div class="foot-links">
+        <a href="#features"><span data-lang="en" class="active">Features</span><span data-lang="zh">功能</span></a>
+        <a href="privacy.html"><span data-lang="en" class="active">Privacy</span><span data-lang="zh">隐私</span></a>
+        <a href="mailto:bjyqd2018@gmail.com"><span data-lang="en" class="active">Contact</span><span data-lang="zh">联系我们</span></a>
+      </div>
+      <div class="copyright">&copy; 2026 Tidy It. All rights reserved.</div>
+    </div>
+  </footer>
+
+  <script>
+    function setLang(lang) {
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-lang]').forEach(function (el) {
+        el.classList.toggle('active', el.getAttribute('data-lang') === lang);
+      });
+      document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+      document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+    }
+    (function () {
+      var pref = (navigator.language || 'en').toLowerCase();
+      if (pref.indexOf('zh') === 0) setLang('zh');
+    })();
+  </script>
+</body>
+</html>
