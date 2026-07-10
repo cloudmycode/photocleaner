@@ -973,6 +973,14 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         try await PHPhotoLibrary.shared().performChanges {
             PHAssetChangeRequest.deleteAssets(result)
         }
+        // 系统的 PHPhotoLibraryChangeObserver 回调存在延迟（这里额外做了 1.5s 防抖），
+        // 若用户删除后立即返回上级并再次进入分类列表（如"屏幕截图"），
+        // 尚未刷新的内存缓存里仍然持有已删除的 PHAsset —— 请求缩略图会为空、
+        // 存储大小会显示为 0KB，导致"照片还在但 0KB"的错觉。
+        // 因此在本地即时把这些资产从内存里清理干净，并抑制随后到来的整体刷新。
+        suppressLibraryRefreshUntil = Date().addingTimeInterval(3)
+        purgeDeletedAssetsFromMemory(identifiers)
+        removeDeletedAssetsFromDetailGroups(identifiers)
     }
 
     func exportAssetsForSharing(_ assets: [PHAsset]) async throws -> [URL] {
@@ -1004,6 +1012,7 @@ final class PhotoLibraryService: NSObject, ObservableObject {
         }
         // 抑制紧接着到来的相册变更整体刷新（系统回调有延迟，这里留出时间窗口）
         suppressLibraryRefreshUntil = Date().addingTimeInterval(3)
+        purgeDeletedAssetsFromMemory(identifiers)
         removeDeletedAssetsFromDetailGroups(identifiers)
     }
 
@@ -1099,6 +1108,135 @@ final class PhotoLibraryService: NSObject, ObservableObject {
             applyBurstGroups(burstResult.groups)
             Task { await persistBurstDetailGroups() }
         }
+    }
+
+    /// 从内存中的媒体分类数组、月份分组以及各项计数/存储字节里同步移除已删除的资产，
+    /// 使得用户在 `AssetGridCleanView`、`AssetSwipeCleanView` 等页面删除后
+    /// 立即返回上级再进入时，不会看到"照片还在但 0KB"的残影。
+    private func purgeDeletedAssetsFromMemory(_ identifiers: Set<String>) {
+        guard !identifiers.isEmpty else { return }
+
+        // 汇总每类被移除资产的存储大小，据此增量更新 *StorageBytes，
+        // 避免对整库重新累加，节省耗时。
+        let screenshotDelta = removedStorageDelta(from: &screenshotAssets, identifiers: identifiers)
+        if screenshotDelta.removedCount > 0 {
+            screenshotCount = max(0, screenshotCount - screenshotDelta.removedCount)
+            screenshotStorageBytes = max(0, screenshotStorageBytes - screenshotDelta.bytes)
+        }
+
+        let livePhotoDelta = removedStorageDelta(from: &livePhotoAssets, identifiers: identifiers)
+        if livePhotoDelta.removedCount > 0 {
+            livePhotoCount = max(0, livePhotoCount - livePhotoDelta.removedCount)
+            livePhotoStorageBytes = max(0, livePhotoStorageBytes - livePhotoDelta.bytes)
+        }
+
+        let videoDelta = removedStorageDelta(from: &videoAssets, identifiers: identifiers)
+        if videoDelta.removedCount > 0 {
+            videoCount = max(0, videoCount - videoDelta.removedCount)
+            videoStorageBytes = max(0, videoStorageBytes - videoDelta.bytes)
+        }
+
+        let largeVideoDelta = removedStorageDelta(from: &largeVideoAssets, identifiers: identifiers)
+        if largeVideoDelta.removedCount > 0 {
+            largeVideoCount = max(0, largeVideoCount - largeVideoDelta.removedCount)
+            largeVideoStorageBytes = max(0, largeVideoStorageBytes - largeVideoDelta.bytes)
+        }
+
+        let recordingDelta = removedStorageDelta(from: &screenRecordingAssets, identifiers: identifiers)
+        if recordingDelta.removedCount > 0 {
+            screenRecordingCount = max(0, screenRecordingCount - recordingDelta.removedCount)
+            screenRecordingStorageBytes = max(0, screenRecordingStorageBytes - recordingDelta.bytes)
+        }
+
+        // 月份分组：重建包含已删资产的分组（否则月度视图仍会展示无效的 PHAsset）。
+        var monthGroupsChanged = false
+        var newMonthGroups: [PhotoMonthGroup] = []
+        newMonthGroups.reserveCapacity(monthGroups.count)
+        var monthlyBytesDelta: Int64 = 0
+        for group in monthGroups {
+            if group.availableIDs.isDisjoint(with: identifiers) {
+                newMonthGroups.append(group)
+                continue
+            }
+            let remaining = group.assets.filter { !identifiers.contains($0.localIdentifier) }
+            if remaining.count == group.assets.count {
+                newMonthGroups.append(group)
+                continue
+            }
+            monthGroupsChanged = true
+            let removedBytes = Self.assetStorageBytesSum(for: group.assets.filter {
+                identifiers.contains($0.localIdentifier)
+            })
+            let newBytes = max(0, group.storageBytes - removedBytes)
+            monthlyBytesDelta += removedBytes
+            if !remaining.isEmpty {
+                newMonthGroups.append(
+                    PhotoMonthGroup(
+                        id: group.id,
+                        date: group.date,
+                        assets: remaining,
+                        storageBytes: newBytes
+                    )
+                )
+            }
+        }
+        if monthGroupsChanged {
+            monthGroups = newMonthGroups
+            // 月份浏览进度里也清理掉这些 ID
+            for id in identifiers {
+                for (monthID, _) in monthlyReviewedIDs {
+                    setMonthlyAsset(id, reviewed: false, monthID: monthID)
+                }
+            }
+        }
+
+        // 更新照片总数（照片包含所有非视频资产；这里只在实际发生变化时下调）。
+        let removedImageCount = screenshotDelta.removedCount + livePhotoDelta.removedCount
+        if removedImageCount > 0 {
+            photoCount = max(0, photoCount - removedImageCount)
+        }
+
+        // 更新可用媒体总字节数（照片+视频合计）。使用分类字节增量之和，避免遗漏。
+        let totalRemovedBytes = screenshotDelta.bytes
+            + livePhotoDelta.bytes
+            + videoDelta.bytes
+            + largeVideoDelta.bytes
+            + recordingDelta.bytes
+        if totalRemovedBytes > 0 || monthlyBytesDelta > 0 {
+            let candidate = max(totalRemovedBytes, monthlyBytesDelta)
+            mediaStorageBytes = max(0, mediaStorageBytes - candidate)
+        }
+
+        // 已持久化的主页概览也要同步，避免下次冷启动读到旧值。
+        persistHomeSummary()
+    }
+
+    /// 从数组中移除匹配的资产，并返回被移除数量与其存储字节合计。
+    private func removedStorageDelta(
+        from assets: inout [PHAsset],
+        identifiers: Set<String>
+    ) -> (removedCount: Int, bytes: Int64) {
+        guard !assets.isEmpty else { return (0, 0) }
+        var removedBytes: Int64 = 0
+        var removedCount = 0
+        var remaining: [PHAsset] = []
+        remaining.reserveCapacity(assets.count)
+        for asset in assets {
+            if identifiers.contains(asset.localIdentifier) {
+                removedBytes += Self.assetStorageBytes(asset)
+                removedCount += 1
+            } else {
+                remaining.append(asset)
+            }
+        }
+        if removedCount > 0 {
+            assets = remaining
+        }
+        return (removedCount, removedBytes)
+    }
+
+    nonisolated private static func assetStorageBytesSum(for assets: [PHAsset]) -> Int64 {
+        assets.reduce(Int64(0)) { $0 + assetStorageBytes($1) }
     }
 
     private static func pruneDetailGroups(
