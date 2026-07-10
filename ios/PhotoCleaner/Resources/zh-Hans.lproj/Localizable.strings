@@ -149,6 +149,8 @@
 "month.delete.confirm.title" = "删除已标记的照片？";
 "month.delete.confirm.message" = "%d 张照片将被移至“最近删除”。";
 "month.delete.confirm.action" = "删除照片";
+"album.delete.confirm.title" = "删除相册？";
+"album.delete.confirm.message" = "“%@” 将被删除。";
 "month.review.complete" = "本月检查完成";
 "month.review.complete.description" = "这个月的照片已经全部检查完成。";
 "month.review.restart" = "重新检查";

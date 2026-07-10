@@ -4200,12 +4200,9 @@ struct EmptyAlbumCleanView: View {
         .onAppear {
             library.restoreEmptyAlbumsIfNeeded()
         }
-        .confirmationDialog(
-            "Delete Album?",
-            isPresented: $showDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
+        .alert("album.delete.confirm.title", isPresented: $showDeleteConfirmation) {
+            Button("cancel", role: .cancel) {}
+            Button("delete", role: .destructive) {
                 guard let id = pendingDeleteID else { return }
                 Task {
                     do {
@@ -4215,9 +4212,10 @@ struct EmptyAlbumCleanView: View {
                     }
                 }
             }
-            Button("cancel", role: .cancel) {}
         } message: {
-            Text(pendingDeleteTitle.map { "\"\($0)\" will be deleted." } ?? "")
+            if let title = pendingDeleteTitle {
+                Text(String.localizedStringWithFormat(L("album.delete.confirm.message"), title))
+            }
         }
         .alert("delete.failed", isPresented: Binding(
             get: { deletionError != nil },

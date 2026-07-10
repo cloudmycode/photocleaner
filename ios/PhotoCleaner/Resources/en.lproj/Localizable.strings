@@ -149,6 +149,8 @@
 "month.delete.confirm.title" = "Delete Marked Photos?";
 "month.delete.confirm.message" = "%d photos will be moved to Recently Deleted.";
 "month.delete.confirm.action" = "Delete Photos";
+"album.delete.confirm.title" = "Delete Album?";
+"album.delete.confirm.message" = "\"%@\" will be deleted.";
 "month.review.complete" = "Month Reviewed";
 "month.review.complete.description" = "All photos in this month have been reviewed.";
 "month.review.restart" = "Review Again";

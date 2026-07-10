@@ -6,6 +6,57 @@
 
 ## 2026-07-10
 
+### 修复：空相册删除确认弹窗按钮文字在中文简体下显示为英文
+
+**触发场景**（引自 `ios/docs/m.md`）：
+> 应用当前是[中文简体]，进入[空相册]目录，点击删除按钮，显示"Delete Album"，与进入[大型视频]列表的删除按钮的中文不一致。需要调整为与[大型视频]列表的删除按钮语言显示一致。
+
+**根因分析**：
+
+`EmptyAlbumCleanView` 的删除确认弹窗使用了硬编码的英文字符串：
+
+```swift
+.alert("Delete Album?", isPresented: $showDeleteConfirmation) {
+    Button("cancel", role: .cancel) {}
+    Button("Delete", role: .destructive) { ... }
+} message: {
+    Text(pendingDeleteTitle.map { "\"\($0)\" will be deleted." } ?? "")
+}
+```
+
+SwiftUI 的 `.alert("string", ...)` 会把参数当作 `LocalizedStringKey` 去 `Localizable.strings` 中查找对应的翻译。`"Delete Album?"` 和 `"Delete"` 这两个 key 在任何语言版本的 strings 文件中都不存在 → 找不到翻译，SwiftUI 回退显示原始英文字符串。
+
+作为对比，大型视频等列表共用 `monthlyDeleteConfirmation` 修饰器，其中的弹窗标题使用本地化 key `"month.delete.confirm.title"`（存在 strings 文件中，会正确显示中文），因此表现一致。
+
+**修复方式**：
+
+1. `ios/PhotoCleaner/ PhotoPreview.swift`：
+   - 弹窗标题改为本地化 key `"album.delete.confirm.title"`
+   - 确认按钮改为本地化 key `"delete"`（strings 文件中已有：`"delete" = "删除"`）
+   - 消息文本改为 `L("album.delete.confirm.message")` + `String.localizedStringWithFormat` 格式化，与 `monthlyDeleteConfirmation` 保持一致
+
+2. `ios/PhotoCleaner/Resources/zh-Hans.lproj/Localizable.strings`：
+   - 新增 `"album.delete.confirm.title" = "删除相册？";`
+   - 新增 `"album.delete.confirm.message" = "“%@” 将被删除。";`
+
+3. `ios/PhotoCleaner/Resources/en.lproj/Localizable.strings`：
+   - 新增 `"album.delete.confirm.title" = "Delete Album?";`
+   - 新增 `"album.delete.confirm.message" = "\"%@\" will be deleted.";`
+
+**影响范围**：
+- 仅影响 `EmptyAlbumCleanView` 的删除确认弹窗。功能逻辑不变。
+- 当应用语言为中文简体时，弹窗标题显示"删除相册？"，确认按钮显示"删除"，消息提示"“相册名” 将被删除。"，与大型视频列表的删除弹窗风格一致。
+- 其他语言会自动回退到英文。
+
+**验证建议**：
+1. 将 iOS 系统语言设为"简体中文" → 进入"空相册" → 点击相册右侧删除按钮 → 确认弹窗应显示中文。
+2. 切换语言为英文 → 同上操作 → 弹窗应显示英文。
+3. 对比大型视频删除弹窗的中文翻译风格，应一致。
+
+---
+
+## 2026-07-10
+
 ### 修复：从"屏幕截图 / 视频 / 大视频 / 屏幕录制"列表删除照片后，返回首页再次进入仍能看到已删除项（占位缩略图 + 0KB）
 
 **触发场景**（引自 `ios/docs/m.md`）：
