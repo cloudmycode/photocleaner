@@ -1,0 +1,8 @@
+/dist/
+/preview/
+/*.zip
+__pycache__/
+/deploy/*.png
+/deploy/*.json
+/deploy/*.sha256
+/deploy/*.tar.gz

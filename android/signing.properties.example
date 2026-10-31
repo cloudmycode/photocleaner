@@ -1,0 +1,6 @@
+# Copy to signing.properties and supply passwords locally. Never commit that file.
+# Relative paths are resolved from the android/ directory.
+storeFile=../../antivirus/Max2/max2/readme/key.jks
+storePassword=
+keyAlias=securityantivirus
+keyPassword=

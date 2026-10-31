@@ -13,3 +13,17 @@ server/src/go/smart-search
 
 # Local search index exports
 script/data/
+
+# Generated release packages and store-material exports
+/output/
+*.apk
+*.aab
+
+# Signing material and machine-local credentials
+*.jks
+*.keystore
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example

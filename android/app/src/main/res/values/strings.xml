@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Photo Cleaner</string>
+    <string name="reminder_channel">Monthly photo cleanup</string>
+    <string name="reminder_title">A new month. A little less clutter.</string>
+    <string name="reminder_body">Take a moment to look back and make room for what matters.</string>
+</resources>
