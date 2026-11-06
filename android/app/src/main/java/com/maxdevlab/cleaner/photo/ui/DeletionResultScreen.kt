@@ -37,7 +37,7 @@ private const val RevealStagger = 60
 private const val ResultDuration = RevealStart + RevealStagger * 4 + RevealDuration
 
 @Composable internal fun DeletionResultScreen(state: PhotoState, model: PhotoViewModel, rateApp: () -> Unit) {
-    CleanupResultContent(state, model::back, { model.navigate("home") }, rateApp) {
+    CleanupResultContent(state, model::back, { model.navigate(when (state.trashReturn) { "duplicates", "bursts", "smart" -> "smart"; "screenshots" -> "screenshots"; "review", "finish" -> state.reviewSource; else -> "home" }) }, rateApp) {
         state.deleteReportId?.let(model::cleanupResultVisible)
     }
 }
@@ -95,18 +95,18 @@ private const val ResultDuration = RevealStart + RevealStagger * 4 + RevealDurat
             }
             Spacer(Modifier.height(10.dp))
             ResultReveal(elapsed, 1, finished) {
-                DesignText("${photoCount(state.deletedCount.coerceAtLeast(0))} deleted", color = Muted)
+                DesignText("${if (state.deletedVideoCount > 0) "${photoCount((state.deletedCount - state.deletedVideoCount).coerceAtLeast(0))} · ${state.deletedVideoCount} videos" else photoCount(state.deletedCount.coerceAtLeast(0))} deleted", color = Muted)
             }
             Spacer(Modifier.height(16.dp))
             ResultReveal(elapsed, 2, finished) {
                 DesignText("Cleanup complete", size = 25, weight = FontWeight.Medium)
                 if (state.deleteFailedCount > 0) {
                     Spacer(Modifier.height(10.dp))
-                    DesignText("${photoCount(state.deleteFailedCount)} could not be deleted.", color = Muted)
+                    DesignText("${state.deleteFailedCount} items could not be deleted.", color = Muted)
                 }
                 if (state.deleteCanceledCount > 0) {
                     Spacer(Modifier.height(10.dp))
-                    DesignText("${photoCount(state.deleteCanceledCount)} kept after cancellation.", color = Muted)
+                    DesignText("${state.deleteCanceledCount} items kept after cancellation.", color = Muted)
                 }
             }
             Spacer(Modifier.height(28.dp))

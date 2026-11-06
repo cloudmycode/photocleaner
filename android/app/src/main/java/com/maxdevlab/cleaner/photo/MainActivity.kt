@@ -153,7 +153,7 @@ class MainActivity : ComponentActivity() {
         pendingDeleteId = null; pendingDeleteKind = null
         if (id != null && kind != null) model.deleteResult(id, kind, approved)
     }
-    override fun onStart() { super.onStart(); metadataRevision++; contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer); model.refresh() }
+    override fun onStart() { super.onStart(); metadataRevision++; contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer); contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer); model.refresh() }
     override fun onStop() { contentResolver.unregisterContentObserver(observer); observerJob?.cancel(); super.onStop() }
     private fun rateApp() {
         model.rateClicked()

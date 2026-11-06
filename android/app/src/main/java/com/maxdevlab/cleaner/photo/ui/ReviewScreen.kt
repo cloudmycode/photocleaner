@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,13 +73,14 @@ private val ButtonEase = CubicBezierEasing(.42f, 0f, .58f, 1f)
     val previewSize = remember(stageSize) { PreviewPolicy.size(stageSize.width, stageSize.height) }
     var animating by remember(photo.uri) { mutableStateOf(false) }
     val zoom = remember(photo.uri) { PhotoZoom() }
+    var showVideo by rememberSaveable(photo.uri) { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     BackHandler(enabled = showDetails) { showDetails = false }
     var guide by remember(photo.uri) { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val inbox = remember(state.month) { SwipeInbox() }
-    var flight by remember(state.month) { mutableStateOf<PhotoFlight?>(null) }
+    val inbox = remember(state.month, state.reviewSource) { SwipeInbox() }
+    var flight by remember(state.month, state.reviewSource) { mutableStateOf<PhotoFlight?>(null) }
     var returning by remember { mutableStateOf<Job?>(null) }
     var pinchPhoto by remember { mutableStateOf<String?>(null) }
     val readyPhotos = remember { mutableStateMapOf<String, String>() }
@@ -86,7 +88,7 @@ private val ButtonEase = CubicBezierEasing(.42f, 0f, .58f, 1f)
         readyPhotos.keys.retainAll(remaining.take(2).map { it.uri }.toSet())
     }
     val density = LocalDensity.current.density
-    val enabled = !state.busy && !sharing && !animating && flight == null && !zoom.active && inbox.stroke == null
+    val enabled = !showVideo && !state.busy && !sharing && !animating && flight == null && !zoom.active && inbox.stroke == null
     fun scaleFor(offset: Offset) = .85f + .15f * (abs(offset.y) / maxOf(120 * density, stageHeight * .42f)).coerceIn(0f, 1f)
     fun effectiveNextScale() = if (!animating) inbox.offsetFor(photo)?.let(::scaleFor) ?: nextScale else nextScale
     fun copyDrag(offset: Offset) {
@@ -229,11 +231,11 @@ private val ButtonEase = CubicBezierEasing(.42f, 0f, .58f, 1f)
     val zoomReturning by rememberUpdatedState(newValue = { zoom.active })
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Row(Modifier.fillMaxWidth().height(55.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            DesignRound(DesignIcons.Back, "Back to months", enabled = enabled, tint = DarkAccent, dimWhenDisabled = false) { model.navigate("home") }
+            DesignRound(DesignIcons.Back, "Back to ${if (state.reviewSource == "screenshots") "screenshots" else "months"}", enabled = enabled, tint = DarkAccent, dimWhenDisabled = false) { model.navigate(state.reviewSource) }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DesignText(group.title, size = 15, color = Paper, weight = FontWeight(550), spacing = .1f)
-                    DesignText(group.year.toString(), size = 15, color = Color(0xFF98989D), weight = FontWeight(550), spacing = .1f)
+                    DesignText(state.reviewTitle, size = 15, color = Paper, weight = FontWeight(550), spacing = .1f)
+                    if (state.reviewSource != "screenshots") DesignText(group.year.toString(), size = 15, color = Color(0xFF98989D), weight = FontWeight(550), spacing = .1f)
                 }
                 Spacer(Modifier.height(4.dp))
                 DesignText("${(state.session?.total ?: remaining.size) - remaining.size + 1} / ${state.session?.total ?: remaining.size}", size = 10, color = Muted, spacing = 1f)
@@ -246,7 +248,7 @@ private val ButtonEase = CubicBezierEasing(.42f, 0f, .58f, 1f)
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 9.dp).clipToBounds().onSizeChanged { stageSize = it }) {
             if (previewSize != null) {
                 remaining.getOrNull(2)?.let { PreloadPhoto(it, previewSize) }
-                Box(Modifier.fillMaxSize().testTag("review-photo").pointerInput(state.month, stageSize, density) {
+                Box(Modifier.fillMaxSize().testTag("review-photo").pointerInput(state.month, state.reviewSource, stageSize, density) {
                     detectPhotoGestures({ zoomReturning() }, { dragAction(it) }, { endAction() }, { cancelAction() },
                         { pinchStartAction() }, { a, b, scale -> pinchAction(a, b, scale) }, { pinchEndAction() },
                         onDown = { downAction() }, onEnd = { cancelAction() },
@@ -306,6 +308,7 @@ private val ButtonEase = CubicBezierEasing(.42f, 0f, .58f, 1f)
                 } }
                 }
             }
+            if (photo.isVideo) VideoPlayButton(Modifier.align(Alignment.Center), enabled = enabled) { showVideo = true }
             DirectionButton("Keep", DesignIcons.Up, Modifier.align(Alignment.TopCenter).padding(top = 15.dp), enabled && readyPhotos[photo.uri] == photo.signature) { commit(Decision.KEEP, false) }
             DirectionButton("Remove", DesignIcons.Down, Modifier.align(Alignment.BottomCenter).padding(bottom = 15.dp), enabled && readyPhotos[photo.uri] == photo.signature) { commit(Decision.REMOVE, false) }
             PhotoDetailsPanel(photo, metadataRevision, showDetails, requestPhotoLocation,
@@ -339,6 +342,11 @@ private val ButtonEase = CubicBezierEasing(.42f, 0f, .58f, 1f)
                 DesignText(state.marked.size.toString(), color = Color(0xFFFFC4BF), size = 12, weight = FontWeight.Medium)
             }
         }
+    }
+    if (showVideo) VideoPreview(photo, model.videoPositions,
+        markedForRemoval = ReviewRules.record(photo, state.records)?.decision == Decision.REMOVE) { choice ->
+        showVideo = false
+        choice?.let { model.decide(photo, if (it) Decision.REMOVE else Decision.KEEP) }
     }
     if (guide) DesignSheet("One photo. One swipe.", "↑ Keep — leave it in its month.\n↓ Remove — review before deleting.\n\nPinch with two fingers to look closer. Release to reset.\n\nTap ↶ to undo.", dismiss = { guide = false }) {
         DesignButton("Got it", Modifier.fillMaxWidth().padding(top = 8.dp)) { guide = false }

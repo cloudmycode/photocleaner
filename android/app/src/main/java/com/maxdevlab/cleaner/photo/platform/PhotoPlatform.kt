@@ -17,11 +17,11 @@ data class PhotoPlatform(val sdk: Int) {
     val mediaLocationPermission: String? get() = if (sdk >= 29) Manifest.permission.ACCESS_MEDIA_LOCATION else null
     val requestsNotificationPermission get() = sdk >= 33
     val readPermissions: Array<String> get() = when {
-        sdk >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-        sdk >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        sdk >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        sdk >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES)
         else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
-    val accessExplanation get() = if (supportsSelectedPhotos) "You can allow all photos or choose specific photos." else "You can change photo access in Android settings."
+    val accessExplanation get() = if (supportsSelectedPhotos) "Allow photos and videos, or choose specific items." else "You can change photo and video access in Android settings."
     val deleteExplanation get() = when (deleteMode) {
         DeleteMode.LEGACY -> "Continuing permanently deletes the selected photos. Android may first ask for storage permission. There is no additional system deletion confirmation on this version of Android."
         DeleteMode.SCOPED -> "Android may ask you to approve each photo separately. Canceling stops the remaining deletions; photos already deleted cannot be restored by this app."
@@ -32,11 +32,14 @@ data class PhotoPlatform(val sdk: Int) {
 class PhotoAccessPolicy(private val context: Context, val platform: PhotoPlatform = PhotoPlatform.current()) {
     private fun granted(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     fun access(): Access = when {
-        platform.sdk >= 33 && granted(Manifest.permission.READ_MEDIA_IMAGES) -> Access.FULL
+        platform.sdk >= 33 && granted(Manifest.permission.READ_MEDIA_IMAGES) && granted(Manifest.permission.READ_MEDIA_VIDEO) -> Access.FULL
+        platform.sdk >= 33 && (granted(Manifest.permission.READ_MEDIA_IMAGES) || granted(Manifest.permission.READ_MEDIA_VIDEO)) -> Access.SELECTED
         platform.supportsSelectedPhotos && granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) -> Access.SELECTED
         platform.sdk <= 32 && granted(Manifest.permission.READ_EXTERNAL_STORAGE) -> Access.FULL
         else -> Access.NONE
     }
+    fun canReadImages() = if (platform.sdk >= 33) granted(Manifest.permission.READ_MEDIA_IMAGES) || (platform.supportsSelectedPhotos && granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)) else granted(Manifest.permission.READ_EXTERNAL_STORAGE)
+    fun canReadVideos() = if (platform.sdk >= 33) granted(Manifest.permission.READ_MEDIA_VIDEO) || (platform.supportsSelectedPhotos && granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)) else granted(Manifest.permission.READ_EXTERNAL_STORAGE)
     fun needsMediaLocationPermission() = platform.mediaLocationPermission?.let { !granted(it) } ?: false
     fun needsWritePermission() = platform.deleteMode == DeleteMode.LEGACY && !granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)
 }

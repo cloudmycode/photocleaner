@@ -2,10 +2,14 @@
 package com.maxdevlab.cleaner.photo.ui
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +38,8 @@ internal object DesignIcons {
     val Share = vector("Share", "M12 15V3m-4 4 4-4 4 4M8 9H5v12h14V9h-3")
     val Trash = vector("Trash", "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7")
     val Grid = vector("Months", "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z")
+    val Smart = vector("Cleanup", "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z")
+    val Screenshot = vector("Screenshots", "M8 3H4v5m12-5h4v5M4 16v5h4m12-5v5h-4M8 7h8v10H8z")
     val Check = vector("Check", "m5 12 4 4L19 6")
     val More = vector("More", "M5 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2M12 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2M19 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2")
     val Help = vector("Help", "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M9 8a3 3 0 0 1 6 0c0 2-3 2-3 5m0 4v.1")
@@ -74,9 +80,9 @@ internal object DesignIcons {
     Column(Modifier.background(Color.White.copy(alpha = .8f)).windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
         HorizontalDivider(thickness = 1.dp, color = Color(0x203C3C43))
         Row(Modifier.fillMaxWidth().height(74.dp).padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            listOf(Triple("home", DesignIcons.Grid, "Months"), Triple("trash", DesignIcons.Trash, if (count > 0) "Remove · $count" else "Remove")).forEach { (target, icon, label) ->
+            listOf(Triple("smart", DesignIcons.Smart, "Clean up"), Triple("home", DesignIcons.Grid, "Months"), Triple("screenshots", DesignIcons.Screenshot, "Screenshots"), Triple("trash", DesignIcons.Trash, if (count > 0) "Remove · $count" else "Remove")).forEach { (target, icon, label) ->
                 val tint = if (screen == target) Accent else Muted
-                Column(Modifier.widthIn(min = 80.dp).fillMaxHeight().clickable(role = Role.Tab) { navigate(target) },
+                Column(Modifier.weight(1f).fillMaxHeight().clickable(role = Role.Tab) { navigate(target) },
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(icon, null, Modifier.size(22.dp), tint = tint)
                     Spacer(Modifier.height(8.dp)); DesignText(label, size = 10, color = tint)
@@ -105,5 +111,48 @@ internal object DesignIcons {
         Spacer(Modifier.height(15.dp)); DesignText(title, size = 25, weight = FontWeight.Medium, spacing = -.7f)
         Spacer(Modifier.height(15.dp)); DesignText(copy, size = 12, color = Muted, align = TextAlign.Center)
         action?.let { Spacer(Modifier.height(25.dp)); it() }
+    }
+}
+
+/** Shared icon actions retain spoken labels and long-press explanations. */
+@Composable internal fun DesignIconAction(icon: ImageVector, label: String,
+    modifier: Modifier = Modifier, enabled: Boolean = true, background: Color = Soft,
+    tint: Color = Accent, onClick: () -> Unit) {
+    // Parent sizing (especially Row.weight) belongs on a direct layout child, not inside TooltipBox.
+    Box(modifier) {
+        TooltipBox(positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text(label) } }, state = rememberTooltipState()) {
+            Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).alpha(if (enabled) 1f else .3f)
+                .clip(RoundedCornerShape(17.dp)).background(background)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
+                Icon(icon, label, Modifier.size(26.dp), tint = tint)
+            }
+        }
+    }
+}
+
+@Composable internal fun VideoPlayButton(modifier: Modifier = Modifier, enabled: Boolean = true,
+    diameter: Dp = 64.dp, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled,
+        modifier = modifier.size(diameter).clip(CircleShape).background(Color.Black.copy(alpha = .65f))) {
+        Icon(Icons.Filled.PlayArrow, "Play video", Modifier.size(diameter * .625f),
+            tint = Color.White.copy(alpha = if (enabled) 1f else .4f))
+    }
+}
+
+/** One checkable row for marking media in any full-screen preview. */
+@Composable internal fun RemovalCheckbox(checked: Boolean, modifier: Modifier = Modifier,
+    enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    Row(modifier.heightIn(min = 48.dp).toggleable(value = checked, enabled = enabled,
+        role = Role.Checkbox, onValueChange = onCheckedChange).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Box(Modifier.size(24.dp).alpha(if (enabled) 1f else .3f).clip(CircleShape)
+            .background(if (checked) Accent else Color.Transparent)
+            .border(1.5.dp, if (checked) Accent else Color.White.copy(alpha = .7f), CircleShape),
+            contentAlignment = Alignment.Center) {
+            if (checked) Icon(DesignIcons.Check, null, Modifier.size(16.dp), tint = Color.White)
+        }
+        Spacer(Modifier.width(10.dp))
+        DesignText("Mark for removal", size = 14, color = Color.White.copy(alpha = if (enabled) 1f else .3f))
     }
 }

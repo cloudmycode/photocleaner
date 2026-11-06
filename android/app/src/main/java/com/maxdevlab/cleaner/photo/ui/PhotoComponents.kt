@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -31,12 +32,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import com.maxdevlab.cleaner.photo.R
 import com.maxdevlab.cleaner.photo.images.PreviewPolicy
 import com.maxdevlab.cleaner.photo.images.PreviewSize
 import coil.request.ImageRequest
 import com.maxdevlab.cleaner.photo.data.*
 
-@Composable internal fun Brand() { DesignText("Photo Cleaner", size = 23, weight = FontWeight(650), spacing = -.9f) }
+@Composable internal fun Brand() {
+    DesignText(stringResource(R.string.app_name), size = 23, weight = FontWeight(650), spacing = -.9f)
+}
 @Composable internal fun EmptyState(title: String, body: String) { Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) { Icon(Icons.Outlined.PhotoLibrary, null, Modifier.size(42.dp), tint = Accent); Text(title, fontSize = 20.sp, fontWeight = FontWeight.Medium); Text(body, textAlign = TextAlign.Center, fontSize = 13.sp, color = Muted) } }
 @Composable internal fun rememberPhotoRequest(photo: Photo, preview: PreviewSize? = null): ImageRequest {
     val context = LocalContext.current
@@ -44,6 +48,7 @@ import com.maxdevlab.cleaner.photo.data.*
         val key = "${photo.uri}:${photo.signature}" + (preview?.let { ":preview:${it.width}x${it.height}" } ?: ":thumbnail")
         ImageRequest.Builder(context).data(photo.uri).memoryCacheKey(key).placeholderMemoryCacheKey(key)
             .diskCachePolicy(CachePolicy.DISABLED).crossfade(false).apply {
+                if (photo.isVideo) decoderFactory { result, options, _ -> coil.decode.VideoFrameDecoder(result.source, options) }
                 if (preview != null) size(preview.width, preview.height).scale(Scale.FIT).precision(Precision.EXACT)
             }.build()
     }
@@ -68,8 +73,9 @@ import com.maxdevlab.cleaner.photo.data.*
                 displayedSize = IntSize(it.result.drawable.intrinsicWidth.coerceAtLeast(0), it.result.drawable.intrinsicHeight.coerceAtLeast(0))
                 onImageSize(displayedSize); onReady()
             },
-            onError = { loading = false; failed = true })
+            onError = { loading = false; failed = true; if (photo.isVideo) { onImageSize(IntSize(photo.width, photo.height)); onReady() } })
         if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center).size(20.dp), strokeWidth = 2.dp)
+        if (photo.isVideo) DesignText("▶ ${videoTime(photo.durationMs)}", Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = .65f)).padding(4.dp), color = Color.White, size = 11)
         if (failed) Icon(Icons.Outlined.BrokenImage, "Photo unavailable", Modifier.align(Alignment.Center), tint = Muted)
     }
 }
@@ -89,6 +95,10 @@ import com.maxdevlab.cleaner.photo.data.*
  */
 @Composable internal fun ReviewPhotoImage(photo: Photo, preview: PreviewSize, modifier: Modifier,
     interacting: () -> Boolean, onImageSize: (IntSize) -> Unit) {
+    if (photo.isVideo) {
+        PhotoImage(photo, modifier, ContentScale.Fit, Color.Transparent, preview, onImageSize = onImageSize)
+        return
+    }
     val context = LocalContext.current
     val loader = context.imageLoader
     val latestInteraction by rememberUpdatedState(interacting)

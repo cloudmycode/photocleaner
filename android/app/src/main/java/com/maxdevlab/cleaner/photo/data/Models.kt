@@ -10,7 +10,8 @@ internal fun photoSignature(modified: Long, bytes: Long, takenAt: Long, width: I
 
 enum class Access { NONE, SELECTED, FULL }
 enum class Decision { KEEP, REMOVE }
-data class Photo(val uri: String, val name: String, val takenAt: Long, val bytes: Long, val width: Int, val height: Int, val modified: Long) {
+data class Photo(val uri: String, val name: String, val takenAt: Long, val bytes: Long, val width: Int, val height: Int, val modified: Long, val folder: String = "", val hasCaptureTime: Boolean = true, val isVideo: Boolean = false, val durationMs: Long = 0) {
+    val isScreenshot: Boolean = !isVideo && ScreenshotRules.matches(name, folder)
     val signature: String = photoSignature(modified, bytes, takenAt, width, height)
     val month: String = YearMonth.from(Instant.ofEpochMilli(takenAt).atZone(ZoneId.systemDefault())).toString()
     val dateLabel: String by lazy { DateLabel.format(Instant.ofEpochMilli(takenAt).atZone(ZoneId.systemDefault())) }
@@ -41,3 +42,10 @@ object ReviewRules {
 fun formatBytes(bytes: Long): String = if (bytes >= 1024L * 1024 * 1024) String.format(Locale.ENGLISH, "%.2f GB", bytes / (1024.0 * 1024 * 1024)) else String.format(Locale.ENGLISH, "%.1f MB", bytes / (1024.0 * 1024))
 
 fun photoCount(count: Int): String = "$count ${if (count == 1) "photo" else "photos"}"
+
+fun mediaCount(photos: List<Photo>): String {
+    val videos = photos.count { it.isVideo }
+    return if (videos == 0) photoCount(photos.size) else "${photoCount(photos.size - videos)} · $videos ${if (videos == 1) "video" else "videos"}"
+}
+fun videoTime(ms: Long): String = "%d:%02d".format(java.util.Locale.ROOT, ms.coerceAtLeast(0) / 60000, ms.coerceAtLeast(0) / 1000 % 60)
+enum class MediaFilter { ALL, PHOTOS, VIDEOS; fun includes(photo: Photo) = this == ALL || (this == VIDEOS) == photo.isVideo }

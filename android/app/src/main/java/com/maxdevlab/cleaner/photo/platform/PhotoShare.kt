@@ -19,7 +19,7 @@ object PhotoShare {
         }
         val resolver = context.contentResolver
         (resolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException("Photo is unavailable")).close()
-        val mimeType = resolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/*"
+        val mimeType = resolver.getType(uri)?.takeIf { it.startsWith(if (photo.isVideo) "video/" else "image/") } ?: if (photo.isVideo) "video/*" else "image/*"
         val send = Intent(Intent.ACTION_SEND).apply {
             type = mimeType
             putExtra(Intent.EXTRA_STREAM, uri)

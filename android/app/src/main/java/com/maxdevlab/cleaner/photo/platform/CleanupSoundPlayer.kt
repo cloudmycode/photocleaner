@@ -32,9 +32,11 @@ class CleanupSoundPlayer(context: Context) : DefaultLifecycleObserver {
                 audio.getStreamVolume(AudioManager.STREAM_SYSTEM) == 0 ||
                 notifications.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) return
             stop()
-            stream = pool.play(complete, .65f, .65f, 1, 0, 1f)
+            stream = pool.play(complete, COMPLETION_VOLUME, COMPLETION_VOLUME, 1, 0, 1f)
         }
     }
+    private companion object { const val COMPLETION_VOLUME = .25f }
+
     private fun stop() { if (stream != 0) pool.stop(stream); stream = 0 }
     override fun onResume(owner: LifecycleOwner) { resumed = true }
     override fun onPause(owner: LifecycleOwner) { resumed = false; stop() }

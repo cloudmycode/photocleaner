@@ -56,10 +56,10 @@ android {
         applicationId = "com.maxdevlab.cleaner.photo"
         minSdk = 27
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 16
+        versionName = "1.0.15"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        manifestPlaceholders["appLabel"] = "Photo Cleaner"
+        manifestPlaceholders["appLabel"] = "@string/app_name"
         buildConfigField("boolean", "ISOLATED_TEST_BUILD", "false")
         buildConfigField("boolean", "ADS_ENABLED", adsConfigured.toString())
         buildConfigField("boolean", "AD_TEST_MODE", "false")
@@ -86,7 +86,7 @@ android {
             buildConfigField("boolean", "ISOLATED_TEST_BUILD", isolatedDeviceTest.toString())
             if (isolatedDeviceTest) {
                 applicationIdSuffix = ".devicetest"
-                manifestPlaceholders["appLabel"] = "Photo Cleaner Test"
+                manifestPlaceholders["appLabel"] = "Tidy It Test"
             }
         }
         release {
@@ -101,7 +101,7 @@ android {
         isMinifyEnabled = false
         signingConfig = signingConfigs.getByName("debug")
         applicationIdSuffix = ".devicetest"
-        manifestPlaceholders["appLabel"] = "Photo Cleaner Test"
+        manifestPlaceholders["appLabel"] = "Tidy It Test"
         buildConfigField("boolean", "ISOLATED_TEST_BUILD", "true")
         buildConfigField("boolean", "ADS_ENABLED", "false")
         buildConfigField("boolean", "AD_TEST_MODE", "true")
@@ -133,6 +133,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-video:2.7.0")
     implementation("androidx.work:work-runtime-ktx:2.10.2")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.08.00"))

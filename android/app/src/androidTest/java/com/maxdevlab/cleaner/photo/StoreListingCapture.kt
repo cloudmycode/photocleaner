@@ -4,10 +4,11 @@ import android.Manifest
 import android.os.Build
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
-import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.*
 import com.maxdevlab.cleaner.photo.ads.CleanupAdSession
 import com.maxdevlab.cleaner.photo.data.*
 import com.maxdevlab.cleaner.photo.platform.DeletionJournal
@@ -18,79 +19,82 @@ import org.junit.rules.ExternalResource
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 
-/** Opt-in capture of the real UI with generated sample photos, never the user's library. */
+/** Opt-in real UI capture in an isolated emulator with generated sample media. */
 @RunWith(AndroidJUnit4::class)
 class StoreListingCapture {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val compose = createAndroidComposeRule<MainActivity>()
-    private val photos = TestPhotoFixture(context)
+    private val media = StoreListingMedia(context)
+    private val device get() = UiDevice.getInstance(instrumentation)
+    private fun model() = ViewModelProvider(compose.activity)[PhotoViewModel::class.java]
     private val fixture = object : ExternalResource() {
         override fun before() {
             check(BuildConfig.ISOLATED_TEST_BUILD && context.packageName.endsWith(".devicetest"))
+            check(Build.VERSION.SDK_INT >= 33)
+            check(Build.MODEL.contains("sdk_gphone") || Build.FINGERPRINT.contains("generic"))
             check(InstrumentationRegistry.getArguments().getString("storeListingCapture") == "true")
-            check(InstrumentationRegistry.getArguments().getString("allowPhysicalDevice") == "true")
+            device.wakeUp(); device.executeShellCommand("wm dismiss-keyguard")
             (context.applicationContext as PhotoCleanerApplication).apply {
-                cleanupAds = TestCleanupAds()
-                cleanupAdSession = CleanupAdSession()
+                cleanupAds = TestCleanupAds(); cleanupAdSession = CleanupAdSession()
             }
-            val db = ReviewDatabase(context)
-            try { db.clear() } finally { db.close() }
-            val journal = DeletionJournal(context)
-            try { journal.clear() } finally { journal.close() }
+            ReviewDatabase(context).let { try { it.clear() } finally { it.close() } }
+            DeletionJournal(context).let { try { it.clear() } finally { it.close() } }
             context.getSharedPreferences("rating_invitation", 0).edit().clear().commit()
-            photos.create(count = 40, storeListing = true)
+            media.create()
         }
-        override fun after() { photos.cleanRegisteredPhotos() }
+        override fun after() { media.clean() }
     }
-    private val permissions = when {
-        Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
-        Build.VERSION.SDK_INT >= 29 -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(GrantPermissionRule.grant(
+        Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)).around(fixture).around(compose)
+    private fun waitFor(label: String) {
+        compose.waitUntil(45_000) { compose.onAllNodes(hasText(label) or hasContentDescription(label)).fetchSemanticsNodes().isNotEmpty() }
     }
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(GrantPermissionRule.grant(*permissions))
-        .around(fixture).around(compose)
-    private fun waitFor(text: String) {
-        compose.waitUntil(30_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    private fun click(label: String) {
+        val matcher = (hasText(label) or hasContentDescription(label)) and isEnabled()
+        compose.waitUntil(45_000) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(matcher).performClick()
     }
     private fun capture(name: String) {
-        compose.waitForIdle()
-        instrumentation.waitForIdleSync()
+        compose.waitForIdle(); instrumentation.waitForIdleSync()
         android.os.SystemClock.sleep(1_500)
         val dir = File(context.getExternalFilesDir(null), "store-listing").apply { mkdirs() }
-        check(UiDevice.getInstance(instrumentation).takeScreenshot(File(dir, "$name.png")))
+        check(device.takeScreenshot(File(dir, "$name.png")))
     }
     @Test fun capture() {
-        waitFor("Start sorting")
+        waitFor("Tidy It")
+        click("Months")
+        device.wait(Until.findObject(By.pkg("com.android.systemui").text("Got it")), 1500)?.click()
+        compose.waitUntil(45_000) { !model().state.value.loading && model().state.value.photos.size == 15 }
         capture("01-months")
-        compose.onNodeWithText("Start sorting").performClick()
-        waitFor("1 / 8")
-        capture("02-swipe")
-        compose.onNodeWithContentDescription("Gesture guide").performClick()
-        waitFor("One photo. One swipe.")
-        capture("03-guide")
-        compose.onNodeWithText("Got it").performClick()
-        repeat(8) { index ->
-            waitFor("${index + 1} / 8")
-            if (index == 1) capture("03-full-photo")
-            val label = if (index == 0 || index == 6) "Keep" else "Remove"
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText(label) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText(label).performClick()
+        click("Photos"); click("Start sorting"); waitFor("1 / 3"); capture("02-swipe")
+        click("Gesture guide"); waitFor("One photo. One swipe."); capture("extra-gesture-guide"); click("Got it")
+        click("Back to months"); click("All"); click("Clean up")
+        compose.waitUntil(90_000) { model().state.value.scanComplete && !model().state.value.scanning }
+        check(model().state.value.cleanup(CleanupKind.DUPLICATE).isNotEmpty())
+        check(model().state.value.cleanup(CleanupKind.BURST).isNotEmpty())
+        capture("extra-cleanup-home")
+        click("Duplicate photos"); waitFor("★ Best kept by default"); capture("03-duplicates")
+        click("Back to cleanup"); click("Burst photos"); waitFor("★ Best kept by default"); capture("04-bursts")
+        click("Back to cleanup"); click("Screenshots"); waitFor("Keep what matters."); capture("05-screenshots")
+        click("Months"); click("Videos"); click("Start sorting"); click("Play video")
+        compose.waitUntil(30_000) { compose.onAllNodes(hasContentDescription("Pause video") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        android.os.SystemClock.sleep(2_000)
+        click("Pause video"); click("Mark for removal"); capture("06-video")
+        click("Close video"); waitFor("Month, sorted.")
+        compose.runOnIdle { model().navigate("home") }
+        click("All"); click("Continue sorting")
+        repeat(3) { index ->
+            compose.waitUntil(30_000) { !model().state.value.busy && model().state.value.remaining.firstOrNull()?.isVideo == false }
+            click(if (index < 2) "Remove" else "Keep")
         }
-        waitFor("Month, sorted.")
-        capture("04-month-complete")
-        compose.onNodeWithText("Review removals").performClick()
-        waitFor("Select all")
-        compose.onNodeWithText("Select all").performClick()
-        waitFor("Delete · 6")
-        capture("05-review-removals")
-        compose.onNodeWithText("Delete · 6").performClick()
-        // The publishing capture currently targets the authorized API 27 Huawei device.
-        check(Build.VERSION.SDK_INT == 27)
-        waitFor("Delete photos")
-        compose.onNodeWithText("Delete photos").performClick()
-        waitFor("Cleanup complete")
-        waitFor("6 photos deleted")
-        capture("06-cleanup-complete")
+        waitFor("Month, sorted."); click("Review removals"); click("Select all"); waitFor("Delete · 3")
+        capture("07-review")
+        // Demonstrate revising the final choice in the actual preview: keep the video.
+        click("Play video"); click("Mark for removal"); click("Close video")
+        click("Delete · 2"); click("Delete photos")
+        device.wait(Until.findObject(By.res("android", "button1")), 2500)?.click()
+        compose.waitUntil(45_000) { model().state.value.deletedCount == 2 && !model().state.value.busy }
+        waitFor("Cleanup complete"); capture("08-space")
     }
 }

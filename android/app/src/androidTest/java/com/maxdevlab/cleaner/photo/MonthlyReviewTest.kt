@@ -67,8 +67,12 @@ class MonthlyReviewTest {
         .around(GrantPermissionRule.grant(*permissions)).around(fixture).around(compose)
     private var fullscreenHintHandled = false
     private fun waitFor(text: String) {
-        compose.waitUntil(20_000) { runCatching { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false) }
-        if (!fullscreenHintHandled && text == "Photo Cleaner") {
+        compose.waitUntil(20_000) { runCatching { compose.onAllNodes(hasText(text) or hasContentDescription(text)).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false) }
+        if (text == "Tidy It") {
+            val model = androidx.lifecycle.ViewModelProvider(compose.activity)[PhotoViewModel::class.java]
+            if (model.state.value.screen == "smart") compose.onNodeWithText("Months").performClick()
+        }
+        if (!fullscreenHintHandled && text == "Tidy It") {
             // Android may show its one-time immersive-mode tutorial on a fresh device.
             UiDevice.getInstance(instrumentation).wait(androidx.test.uiautomator.Until.findObject(
                 androidx.test.uiautomator.By.pkg("com.android.systemui").text("Got it")), 2_000)?.click()
@@ -97,7 +101,7 @@ class MonthlyReviewTest {
         check(UiDevice.getInstance(instrumentation).takeScreenshot(File(dir, "$name.png")))
     }
     @Test fun thirdCleanupShowsAdOnlyAfterDataSyncAndBeforeResults() {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         ads.ready = true
         val model = androidx.lifecycle.ViewModelProvider(compose.activity)[PhotoViewModel::class.java]
         val photos = model.state.value.photos.toList()
@@ -136,7 +140,7 @@ class MonthlyReviewTest {
         verifyUnavailableAd(failToShow = true)
     }
     private fun verifyUnavailableAd(failToShow: Boolean) {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.runOnIdle {
             val session = (context.applicationContext as PhotoCleanerApplication).cleanupAdSession
             repeat(2) { index ->
@@ -179,7 +183,7 @@ class MonthlyReviewTest {
             context.getSharedPreferences("rating_invitation", 0).edit()
                 .putLong("rate_remind_after", System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000).commit()
         }
-        waitFor("Photo Cleaner"); capture("01-months")
+        waitFor("Tidy It"); capture("01-months")
         compose.onNodeWithText("Start sorting").assertIsDisplayed().performClick()
         waitFor("1 / 2"); waitForPhoto("Sep 20, 2026"); capture("02-review")
         compose.onNodeWithContentDescription("Gesture guide").performClick()
@@ -207,10 +211,10 @@ class MonthlyReviewTest {
         waitFor("Review removals"); capture("24-completion-removals")
         compose.onNodeWithText("Review removals").performClick()
         waitFor("Select all"); compose.onNodeWithText("Select all").performClick(); waitFor("Delete · 1"); capture("03-to-delete")
-        compose.onNodeWithText("Delete · 1").performClick()
+        compose.onNodeWithContentDescription("Delete · 1").performClick()
         compose.onNodeWithText("Cancel").performClick()
         Assert.assertEquals(3, accessibleFixtureCount())
-        compose.onNodeWithText("Delete · 1").performClick()
+        compose.onNodeWithContentDescription("Delete · 1").performClick()
         when (PhotoPlatform.current().deleteMode) {
             DeleteMode.LEGACY -> {
                 waitFor("Delete photos")
@@ -235,9 +239,9 @@ class MonthlyReviewTest {
                 if (compose.onAllNodes(dismissAction).fetchSemanticsNodes().isNotEmpty()) compose.onNode(dismissAction).performSemanticsAction(SemanticsActions.Dismiss) { it() }
                 compose.waitUntil(20_000) {
                     compose.onAllNodesWithText("Deletion canceled. Your photos were kept.").fetchSemanticsNodes().isEmpty() &&
-                        compose.onAllNodes(hasText("Delete · 1") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                        compose.onAllNodes(hasContentDescription("Delete · 1") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
                 }
-                compose.onNodeWithText("Delete · 1").performClick(); waitFor("Delete photos"); compose.onNodeWithText("Delete photos").performClick()
+                compose.onNodeWithContentDescription("Delete · 1").performClick(); waitFor("Delete photos"); compose.onNodeWithText("Delete photos").performClick()
                 val approve = device.wait(androidx.test.uiautomator.Until.findObject(androidx.test.uiautomator.By.res("android", "button1")), 10_000)
                 Assert.assertNotNull(approve); approve.click()
             }
@@ -246,7 +250,7 @@ class MonthlyReviewTest {
         compose.onNodeWithText("Not now").assertDoesNotExist()
         waitFor("1 photo deleted")
         compose.onNodeWithText(PhotoDetailFormat.size(expectedFreed)).assertExists()
-        if (snoozed) compose.onNodeWithTag("rating-invitation").assertDoesNotExist() else waitFor("Rate Photo Cleaner")
+        if (snoozed) compose.onNodeWithTag("rating-invitation").assertDoesNotExist() else waitFor("Rate Tidy It")
         capture(if (snoozed) "28-deletion-snoozed" else "27-deletion-result")
         Assert.assertEquals(2, accessibleFixtureCount())
         compose.activityRule.scenario.recreate()
@@ -257,12 +261,15 @@ class MonthlyReviewTest {
             verifyRatingCooldownOnDeletionResult()
         }
         compose.onNodeWithText("Done").performClick()
+        waitFor("Tidy It")
+        compose.onNodeWithText("Remove").performClick()
         waitFor("To remove")
         compose.onNodeWithText("Nothing to remove").assertExists()
         compose.onNodeWithText("Months").performClick()
-        waitFor("Photo Cleaner")
-        waitFor("✓ Completed")
-        compose.onNodeWithText("Start sorting").assertDoesNotExist()
+        waitFor("Tidy It")
+        waitFor("Completed months")
+        compose.onNodeWithText("September 2026").assertDoesNotExist()
+        compose.onNodeWithText("Completed months").performClick()
         val model = androidx.lifecycle.ViewModelProvider(compose.activity)[PhotoViewModel::class.java]
         compose.runOnIdle { model.refresh() }
         compose.waitUntil(20_000) { model.state.value.photos.size == 2 && model.state.value.currentGroup?.completed == true }
@@ -272,13 +279,13 @@ class MonthlyReviewTest {
             Assert.assertEquals(beforeDeletion.drop(1), persisted.snapshot(beforeDeletion).photos)
             Assert.assertEquals(Decision.KEEP, persisted.read()[beforeDeletion[1].uri]?.decision)
         } finally { persisted.close() }
-        compose.onNodeWithText("September").performClick()
+        compose.onNodeWithText("September 2026").performClick()
         waitFor("1 / 1"); waitForPhoto("Sep 15, 2026")
         compose.onNodeWithContentDescription("Photo from Sep 20, 2026").assertDoesNotExist()
         compose.onNodeWithContentDescription("Back to months").performClick()
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithContentDescription("Settings").performClick()
-        waitFor("Rate Photo Cleaner"); capture("06-settings")
+        waitFor("Rate Tidy It"); capture("06-settings")
         compose.onNodeWithText("Privacy policy").performScrollTo().performClick()
         waitFor("Your photos. Your device."); capture("25-privacy")
         compose.activityRule.scenario.recreate()
@@ -291,7 +298,7 @@ class MonthlyReviewTest {
         waitFor("At your own pace.")
     }
     @Test fun completedMonthsCanBeRevisitedAndTrashReturnsToSamePhoto() {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithText("September").performClick()
         waitFor("1 / 2")
         compose.onNodeWithContentDescription("Fill screen").assertDoesNotExist()
@@ -323,34 +330,38 @@ class MonthlyReviewTest {
         waitFor("2 / 2")
         compose.onNodeWithContentDescription("Review removals").performClick()
         waitFor("Select all"); compose.onNodeWithText("Select all").performClick()
-        compose.onNodeWithText("Keep selected").performClick()
+        compose.onNodeWithContentDescription("Keep selected").performClick()
         waitFor("Nothing to remove")
         compose.onNodeWithText("Continue sorting").assertDoesNotExist()
         compose.onNodeWithContentDescription("Back to sorting").performClick()
         waitFor("2 / 2")
         Assert.assertEquals(3, accessibleFixtureCount())
         compose.onNodeWithContentDescription("Back to months").performClick()
-        waitFor("Photo Cleaner")
-        compose.onNodeWithText("✓ Completed").assertExists()
-        compose.onNodeWithText("Browse again").assertDoesNotExist()
-        compose.onNodeWithText("Start sorting").assertDoesNotExist()
-        compose.onNodeWithText("Continue sorting").assertDoesNotExist()
+        waitFor("Tidy It")
+        compose.onNodeWithText("Completed months").assertExists()
+        compose.onNodeWithText("September 2026").assertDoesNotExist()
+        compose.onNodeWithText("Start sorting").assertExists() // August is still pending.
         capture("18-completed-home")
-        compose.onNodeWithText("September").performClick()
+        compose.onNodeWithText("Completed months").performClick()
+        compose.onNodeWithText("September 2026").assertExists()
+        compose.onNodeWithText("Completed months").performClick()
+        compose.onNodeWithText("September 2026").assertDoesNotExist()
+        compose.onNodeWithText("Completed months").performClick()
+        compose.onNodeWithText("September 2026").performClick()
         waitFor("1 / 2")
         compose.onNodeWithContentDescription("Back to months").performClick()
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithContentDescription("Settings").performClick()
         waitFor("Reset review progress")
         compose.onNodeWithText("Reset review progress").performScrollTo().performClick()
         waitFor("Reset review progress?")
         compose.onNodeWithText("Reset progress").performClick()
         waitFor("Start sorting") // Reset writes on IO; the home title is already visible before it finishes.
-        compose.onNodeWithText("✓ Completed").assertDoesNotExist()
+        compose.onNodeWithText("Completed months").assertDoesNotExist()
         Assert.assertEquals(3, accessibleFixtureCount())
     }
     @Test fun cleanupSoundPreferenceSurvivesRecreationAndNewViewModel() {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithContentDescription("Cleanup sounds").assertIsOn().performClick()
         compose.onNodeWithContentDescription("Cleanup sounds").assertIsOff()
@@ -369,7 +380,7 @@ class MonthlyReviewTest {
     }
     @Test fun photoDetailsFollowThePhotoAndCanBeCollapsed() {
         val photos = MediaStorePhotoSource(context).query()
-        waitFor("Photo Cleaner"); compose.onNodeWithText("September").performClick()
+        waitFor("Tidy It"); compose.onNodeWithText("September").performClick()
         waitFor("1 / 2")
         compose.onNodeWithText("Full photo").assertDoesNotExist()
         compose.onNodeWithText("Sep 20").assertDoesNotExist()
@@ -446,7 +457,7 @@ class MonthlyReviewTest {
     }
     @Suppress("DEPRECATION")
     @Test fun shareCurrentPhotoAndCancelWithoutChangingSorting() {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithText("September").performClick()
         waitFor("1 / 2"); waitForPhoto("Sep 20, 2026")
         compose.waitUntil(20_000) { compose.onAllNodes(hasContentDescription("Share photo") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
@@ -495,7 +506,7 @@ class MonthlyReviewTest {
     ).action
 
     @Test fun pinchInspectsTheSamePhotoAndReleaseRestoresSorting() {
-        waitFor("Photo Cleaner"); capture("01-months")
+        waitFor("Tidy It"); capture("01-months")
         compose.onNodeWithText("Start sorting").performClick()
         waitFor("1 / 2"); waitForPhoto("Sep 20, 2026")
         compose.onNodeWithContentDescription("Fill screen").assertDoesNotExist()
@@ -521,7 +532,7 @@ class MonthlyReviewTest {
         waitFor("2 / 2"); Assert.assertEquals(3, accessibleFixtureCount())
     }
     @Test fun keepingAllPhotosDoesNotInviteRating() {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithText("Start sorting").performClick()
         waitFor("1 / 2"); choose("Keep")
         waitFor("2 / 2"); choose("Keep")
@@ -529,16 +540,34 @@ class MonthlyReviewTest {
         compose.onNodeWithTag("rating-invitation").assertDoesNotExist()
         compose.activityRule.scenario.recreate()
         waitFor("Month, sorted.")
-        compose.onNodeWithText("Rate Photo Cleaner").assertDoesNotExist()
+        compose.onNodeWithText("Rate Tidy It").assertDoesNotExist()
+    }
+    @Test fun allMonthsSortedShowsCollapsedHistory() {
+        waitFor("Tidy It")
+        compose.onNodeWithText("Start sorting").performClick()
+        waitFor("1 / 2"); choose("Keep")
+        waitFor("2 / 2"); choose("Keep")
+        waitFor("Month, sorted.")
+        compose.onNodeWithText("Next month").performClick()
+        waitFor("1 / 1"); choose("Keep")
+        waitFor("Month, sorted.")
+        compose.onNodeWithContentDescription("Back to months").performClick()
+        waitFor("All months sorted")
+        compose.onNodeWithText("Start sorting").assertDoesNotExist()
+        compose.onNodeWithText("August 2026").assertDoesNotExist()
+        compose.onNodeWithText("Completed months").performClick()
+        compose.onNodeWithText("September 2026").assertExists()
+        compose.onNodeWithText("August 2026").performClick()
+        waitFor("1 / 1")
     }
     @Test fun sortingCompletionOnlyOffersReviewAndNavigation() {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithText("Start sorting").performClick()
         waitFor("1 / 2"); choose("Remove")
         waitFor("2 / 2"); choose("Keep")
         waitFor("Month, sorted.")
         compose.onNodeWithText("Already rated").assertDoesNotExist()
-        compose.onNodeWithText("Rate Photo Cleaner").assertDoesNotExist()
+        compose.onNodeWithText("Rate Tidy It").assertDoesNotExist()
         compose.onNodeWithTag("rating-invitation").assertDoesNotExist()
         capture("26-month-no-rating")
         compose.onNodeWithText("Review removals").performClick()
@@ -556,7 +585,7 @@ class MonthlyReviewTest {
         }
         instrumentation.addMonitor(monitor)
         try {
-            compose.onNodeWithText("Rate Photo Cleaner").performScrollTo().performClick()
+            compose.onNodeWithText("Rate Tidy It").performScrollTo().performClick()
             compose.waitForIdle()
             Assert.assertEquals("market://details?id=${context.packageName}", opened)
             compose.onNodeWithTag("rating-invitation").assertDoesNotExist()
@@ -566,7 +595,7 @@ class MonthlyReviewTest {
             context.getSharedPreferences("rating_invitation", 0).edit()
                 .putLong("rate_remind_after", System.currentTimeMillis() - 1).commit()
             compose.activityRule.scenario.recreate()
-            waitFor("Rate Photo Cleaner")
+            waitFor("Rate Tidy It")
             compose.onNodeWithText("Not now").assertDoesNotExist()
         } finally { instrumentation.removeMonitor(monitor) }
     }
@@ -595,7 +624,7 @@ class MonthlyReviewTest {
         } finally { journal.clear(); journal.close() }
     }
     @Test fun interruptedDeletionReconcilesOnStartupWithoutLosingProgress() {
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         val photos = MediaStorePhotoSource(context).query()
         val reviews = ReviewDatabase(context)
         val journal = DeletionJournal(context)
@@ -632,7 +661,7 @@ class MonthlyReviewTest {
     }
     private fun prepareFastSwipes(): List<Photo> {
         val photos = MediaStorePhotoSource(context).query()
-        waitFor("Photo Cleaner")
+        waitFor("Tidy It")
         compose.onNodeWithText("Start sorting").performClick()
         waitFor("1 / 2")
         compose.waitUntil(20_000) {

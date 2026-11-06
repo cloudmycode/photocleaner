@@ -53,8 +53,8 @@ class DeletionCompatibilityTest {
         assertFalse(PhotoPlatform(27).supportsVolumes); assertTrue(PhotoPlatform(29).supportsVolumes)
         assertFalse(PhotoPlatform(29).supportsTrash); assertTrue(PhotoPlatform(30).supportsTrash)
         assertEquals(listOf("android.permission.READ_EXTERNAL_STORAGE"), PhotoPlatform(32).readPermissions.toList())
-        assertEquals(listOf("android.permission.READ_MEDIA_IMAGES"), PhotoPlatform(33).readPermissions.toList())
-        assertEquals(2, PhotoPlatform(34).readPermissions.size)
+        assertEquals(listOf("android.permission.READ_MEDIA_VIDEO", "android.permission.READ_MEDIA_IMAGES"), PhotoPlatform(33).readPermissions.toList())
+        assertEquals(3, PhotoPlatform(34).readPermissions.size)
     }
     @Test fun legacyReportsActualSuccessAndFailurePerPhoto() = runBlocking {
         val backend = Backend(DeleteMode.LEGACY)

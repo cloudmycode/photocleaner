@@ -23,16 +23,32 @@ import kotlinx.coroutines.CancellationException
 data class PhotoState(
     val photos: List<Photo> = emptyList(), val records: Map<String, ReviewRecord> = emptyMap(),
     val access: Access = Access.NONE, val loading: Boolean = true, val busy: Boolean = false,
-    val screen: String = "home", val month: String? = null, val message: String? = null,
+    val screen: String = "smart", val month: String? = null, val message: String? = null,
     val canUndo: Boolean = false, val reminder: Boolean = false, val cleanupSoundsEnabled: Boolean = true,
     val showRatingInvitation: Boolean = false,
     val session: ReviewSession? = null, val trashReturn: String = "home",
-    val deletedCount: Int = 0, val deletedBytes: Long = 0, val deleteReportId: String? = null,
-    val deleteFailedCount: Int = 0, val deleteCanceledCount: Int = 0
+    val deletedVideoCount: Int = 0, val deletedCount: Int = 0, val deletedBytes: Long = 0, val deleteReportId: String? = null,
+    val deleteFailedCount: Int = 0, val deleteCanceledCount: Int = 0,
+    val reviewSource: String = "home", val cleanupGroups: List<CleanupGroup> = emptyList(),
+    val scanning: Boolean = false, val scanned: Int = 0, val scanTotal: Int = 0, val scanComplete: Boolean = false,
+    val mediaFilter: MediaFilter = MediaFilter.ALL,
+    val scanSkipped: Int = 0, val scanError: String? = null
 ) {
-    val groups by lazy(LazyThreadSafetyMode.NONE) { ReviewRules.groups(photos, records) }
+    val groups by lazy(LazyThreadSafetyMode.NONE) { ReviewRules.groups(photos.filter { mediaFilter.includes(it) }, records) }
     // Reviewing one month does not group and sort every other month in the library.
-    val currentGroup by lazy(LazyThreadSafetyMode.NONE) { ReviewRules.month(photos, records, month) }
+    val screenshots by lazy(LazyThreadSafetyMode.NONE) { photos.filter { it.isScreenshot } }
+    val reviewPhotos get() = if (reviewSource == "screenshots") screenshots else photos.filter { mediaFilter.includes(it) }
+    val reviewGroups get() = if (reviewSource == "screenshots") ReviewRules.groups(screenshots, records) else groups
+    val currentGroup by lazy(LazyThreadSafetyMode.NONE) {
+        if (reviewSource == "screenshots" && month == null) screenshots.takeIf { it.isNotEmpty() }?.let {
+            MonthGroup(it.first().month, it, it.count { p -> ReviewRules.record(p, records)?.decision != null })
+        } else ReviewRules.month(reviewPhotos, records, month)
+    }
+    val reviewTitle get() = if (reviewSource == "screenshots") "Screenshots" else currentGroup?.title.orEmpty()
+    fun cleanup(kind: CleanupKind) = cleanupGroups.filter { it.kind == kind }
+    fun cleanupCandidates(selected: Set<String>): List<Photo> = cleanupGroups
+        .filter { it.kind == if (screen == "duplicates") CleanupKind.DUPLICATE else CleanupKind.BURST }
+        .flatMap { it.photos }.distinctBy { it.uri }.filter { it.uri in selected }.take(ReviewRules.DELETE_LIMIT)
     val remaining: List<Photo> by lazy(LazyThreadSafetyMode.NONE) {
         val available = currentGroup?.photos.orEmpty().associateBy { it.uri }
         session?.uris?.mapNotNull(available::get).orEmpty()
@@ -46,6 +62,11 @@ sealed interface PhotoEvent {
 }
 class PhotoViewModel(application: Application, private val saved: SavedStateHandle) : AndroidViewModel(application) {
     private val repository = PhotoRepository(application)
+    private val analyzer = SmartPhotoAnalyzer(application)
+    internal var cleanupSelection = CleanupSelection()
+    private var scanJob: kotlinx.coroutines.Job? = null
+    @Volatile private var scanGeneration = 0
+    private var analyzedPhotos: List<Photo>? = null
     private val ratingInvitation = RatingInvitationStore(application)
     private val soundPreferences = application.getSharedPreferences("cleanup_feedback", 0)
     private val cleanupAdSession = (application as PhotoCleanerApplication).cleanupAdSession
@@ -63,7 +84,7 @@ class PhotoViewModel(application: Application, private val saved: SavedStateHand
         _deleteProgress.value = it
     }
     private var activeDeleteId: String? = null
-    private val _state = MutableStateFlow(PhotoState(deleteReportId = saved["deleteReportId"], showRatingInvitation = ratingInvitation.isVisible(), trashReturn = saved["trashReturn"] ?: "home", screen = (saved.get<String>("screen") ?: "home").let { if (it == "cleanupTransition") "deleted" else it }, month = saved["month"], deletedCount = saved["deletedCount"] ?: 0, deletedBytes = saved["deletedBytes"] ?: 0, deleteFailedCount = saved["deleteFailedCount"] ?: 0, deleteCanceledCount = saved["deleteCanceledCount"] ?: 0))
+    private val _state = MutableStateFlow(PhotoState(deletedVideoCount = saved["deletedVideoCount"] ?: 0, mediaFilter = saved.get<String>("mediaFilter")?.let { MediaFilter.valueOf(it) } ?: MediaFilter.ALL, reviewSource = saved["reviewSource"] ?: "home", deleteReportId = saved["deleteReportId"], showRatingInvitation = ratingInvitation.isVisible(), trashReturn = saved["trashReturn"] ?: "home", screen = (saved.get<String>("screen") ?: "smart").let { if (it == "cleanupTransition") "deleted" else it }, month = saved["month"], deletedCount = saved["deletedCount"] ?: 0, deletedBytes = saved["deletedBytes"] ?: 0, deleteFailedCount = saved["deleteFailedCount"] ?: 0, deleteCanceledCount = saved["deleteCanceledCount"] ?: 0))
     val state = _state.asStateFlow()
     private val eventChannel = Channel<PhotoEvent>(Channel.BUFFERED)
     val events = eventChannel.receiveAsFlow()
@@ -87,33 +108,94 @@ class PhotoViewModel(application: Application, private val saved: SavedStateHand
         if (_state.value.busy) return
         val current = _state.value
         val origin = if (screen == "trash" && current.screen !in listOf("trash", "deleted")) {
-            current.screen.takeIf { it in listOf("review", "finish") } ?: "home"
+            current.screen.takeIf { it in listOf("review", "finish", "screenshots", "smart", "duplicates", "bursts") } ?: "home"
         } else current.trashReturn
         saved["screen"] = screen; saved["trashReturn"] = origin
         _state.update { it.copy(screen = screen, trashReturn = origin) }
+        if (screen in listOf("smart", "duplicates", "bursts")) scanCleanup()
     }
     fun back() {
         val state = _state.value
-        val target = if (state.screen in listOf("trash", "deleted")) state.trashReturn else "home"
+        val target = when (state.screen) {
+            "trash", "deleted" -> state.trashReturn
+            "review", "finish" -> state.reviewSource
+            "duplicates", "bursts" -> "smart"
+            else -> "smart"
+        }
         navigate(if (target == "review" && state.remaining.isEmpty()) "finish" else target)
     }
-    fun openMonth(id: String) {
+    fun setMediaFilter(filter: MediaFilter) {
         if (_state.value.busy) return
-        val group = _state.value.groups.find { it.id == id } ?: return
-        undo.clear(); saved["month"] = id; saved["screen"] = "review"
-        _state.update { it.copy(month = id, screen = "review", canUndo = false,
+        saved["mediaFilter"] = filter.name
+        undo.clear()
+        _state.update { it.copy(mediaFilter = filter, session = null, canUndo = false) }
+        listOf("reviewAnchor", "reviewTotal", "reviewAll", "reviewEnded").forEach { saved.remove<Any>(it) }
+    }
+    val videoPositions = mutableMapOf<String, Int>()
+    fun openMonth(id: String, source: String = "home") {
+        if (_state.value.busy) return
+        val group = (if (source == "screenshots") ReviewRules.groups(_state.value.screenshots, _state.value.records) else _state.value.groups).find { it.id == id } ?: return
+        undo.clear(); saved["month"] = id; saved["screen"] = "review"; saved["reviewSource"] = source
+        _state.update { it.copy(month = id, reviewSource = source, screen = "review", canUndo = false,
             session = ReviewSession.start(group, it.records)) }
         saveSession()
     }
     fun openNextMonth() {
-        val next = _state.value.groups.firstOrNull { !it.completed }
-        if (next == null) navigate("home") else openMonth(next.id)
+        val next = _state.value.reviewGroups.firstOrNull { !it.completed }
+        if (next == null) navigate(_state.value.reviewSource) else openMonth(next.id, _state.value.reviewSource)
     }
     fun resumeReview() {
         val state = _state.value
         val group = state.currentGroup?.takeUnless { it.completed }
-            ?: state.groups.firstOrNull { !it.completed } ?: state.currentGroup ?: state.groups.firstOrNull()
-        if (group == null) navigate("home") else openMonth(group.id)
+            ?: state.reviewGroups.firstOrNull { !it.completed } ?: state.currentGroup ?: state.reviewGroups.firstOrNull()
+        if (group == null) navigate(state.reviewSource) else if (state.reviewSource == "screenshots" && state.month == null) openScreenshots() else openMonth(group.id, state.reviewSource)
+    }
+    fun openScreenshots() {
+        if (_state.value.busy) return
+        val photos = _state.value.screenshots
+        if (photos.isEmpty()) return
+        undo.clear(); saved["month"] = null; saved["screen"] = "review"; saved["reviewSource"] = "screenshots"
+        _state.update { it.copy(month = null, reviewSource = "screenshots", screen = "review", canUndo = false,
+            session = ReviewSession.start(MonthGroup(photos.first().month, photos, 0), it.records)) }
+        saveSession()
+    }
+    fun scanCleanup(force: Boolean = false) {
+        val snapshot = _state.value
+        if (snapshot.access == Access.NONE || snapshot.loading || snapshot.busy) return
+        val images = snapshot.photos.filterNot { it.isVideo }
+        if (!force && analyzedPhotos == images && (snapshot.scanComplete || scanJob?.isActive == true)) return
+        scanJob?.cancel()
+        val generation = ++scanGeneration
+        analyzedPhotos = images
+        _state.update { it.copy(scanning = true, scanComplete = false, scanned = 0, scanTotal = 0, scanSkipped = 0, scanError = null) }
+        scanJob = viewModelScope.launch {
+            try {
+                var cachedCount: Int? = null
+                val result = analyzer.analyze(images, snapshot.records) { progress ->
+                    val cached = cachedCount ?: progress.scanned.also { cachedCount = it }
+                    if (generation == scanGeneration) _state.update {
+                        it.copy(scanned = progress.scanned - cached, scanTotal = images.size - cached, cleanupGroups = progress.groups?.let { groups ->
+                            mergeCleanupGroups(groups, it.cleanupGroups)
+                        } ?: it.cleanupGroups)
+                    }
+                }
+                if (generation == scanGeneration) _state.update {
+                    // Preserve processed one-photo groups during this visit, as in iOS.
+                    it.copy(cleanupGroups = mergeCleanupGroups(result.groups, it.cleanupGroups), scanning = false, scanComplete = true, scanSkipped = result.skipped)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { if (generation == scanGeneration) _state.update { it.copy(scanning = false, scanError = "Could not finish scanning. Please try again.") } }
+        }
+    }
+    private fun mergeCleanupGroups(fresh: List<CleanupGroup>, previous: List<CleanupGroup>): List<CleanupGroup> {
+        val included = fresh.flatMap { group -> group.photos.map { group.kind to it.uri } }.toHashSet()
+        return fresh + previous.filter { it.photos.size == 1 && (it.kind to it.photos.first().uri) !in included }
+    }
+    private fun invalidateCleanup(photos: List<Photo>) {
+        if (analyzedPhotos == photos.filterNot { it.isVideo }) return
+        scanJob?.cancel(); scanGeneration++; analyzedPhotos = null
+        val identities = photos.associateBy { PhotoIdentity(it.uri, it.signature) }
+        _state.update { it.copy(cleanupGroups = it.cleanupGroups.mapNotNull { g -> g.reconcile(identities) }, scanning = false, scanComplete = false) }
     }
     // Store a small bookmark, not the entire photo library, in the saved instance state.
     private fun saveSession() {
@@ -130,7 +212,10 @@ class PhotoViewModel(application: Application, private val saved: SavedStateHand
         val photos = if (all) group.photos else group.photos.filter { ReviewRules.record(it, state.records)?.decision == null }
         val anchor = saved.get<String>("reviewAnchor")
         val start = photos.indexOfFirst { it.uri == anchor }.coerceAtLeast(0)
-        val uris = if (saved.get<Boolean>("reviewEnded") == true) emptyList() else photos.drop(start).map { it.uri }
+        val uris = if (saved.get<Boolean>("reviewEnded") == true) {
+            group.photos.filter { ReviewRules.record(it, state.records)?.decision == null }.map { it.uri }
+        } else if (all) photos.drop(start).map { it.uri }
+        else (photos.drop(start) + photos.take(start)).map { it.uri }
         return ReviewSession(uris, maxOf(saved.get<Int>("reviewTotal") ?: uris.size, uris.size), all)
     }
     fun refresh() = viewModelScope.launch {
@@ -150,20 +235,28 @@ class PhotoViewModel(application: Application, private val saved: SavedStateHand
                 }
                 val access = repository.access()
                 if (access == Access.NONE) {
-                    undo.clear()
-                    _state.update { it.copy(access = access, photos = emptyList(), records = emptyMap(), loading = false, canUndo = false, screen = "home") }
+                    undo.clear(); invalidateCleanup(emptyList())
+                    _state.update { it.copy(access = access, photos = emptyList(), records = emptyMap(), loading = false, canUndo = false, screen = "smart") }
                     return@withLock
                 }
                 val (photos, records) = repository.load()
+                invalidateCleanup(photos)
                 _state.update {
                     val next = it.copy(photos = photos, records = records, access = repository.access(), loading = false, reminder = MonthlyReminder.enabled(app))
-                    val session = next.session?.reconcile(photos) ?: restoreSession(next)
-                    next.copy(session = session, screen = if (next.screen == "review" && session?.uris.isNullOrEmpty()) "finish" else next.screen)
+                    val session = next.session?.reconcile(next.currentGroup?.photos.orEmpty(), records) ?: restoreSession(next)
+                    val screen = when {
+                        next.screen == "review" && session?.uris.isNullOrEmpty() -> "finish"
+                        next.screen == "finish" && !session?.uris.isNullOrEmpty() -> "review"
+                        else -> next.screen
+                    }
+                    next.copy(session = session, screen = screen)
                 }
                 saved["screen"] = if (_state.value.screen == "cleanupTransition") "deleted" else _state.value.screen
                 saveSession()
+                if (_state.value.screen in listOf("smart", "duplicates", "bursts")) scanCleanup()
             } catch (e: CancellationException) { throw e }
             catch (_: SecurityException) {
+                invalidateCleanup(emptyList())
                 _state.update { it.copy(access = Access.NONE, photos = emptyList(), records = emptyMap(), loading = false, message = "Photo access changed. Please choose your access again.") }
             } catch (_: Exception) {
                 _state.update { it.copy(loading = false, message = "Could not load your photos. Please try again.") }
@@ -213,15 +306,24 @@ class PhotoViewModel(application: Application, private val saved: SavedStateHand
         repository.writeAll(changes)
         undo.clear(); _state.update { it.copy(records = next, message = "Photos kept") }
     }
-    fun requestDelete(selected: Set<String>) {
+    fun requestDelete(selected: Set<String>, expected: Set<PhotoIdentity>? = null) {
         if (_state.value.busy) return
+        val fromGroups = _state.value.screen in listOf("duplicates", "bursts")
+        val requested = (if (fromGroups) _state.value.cleanupCandidates(selected) else ReviewRules.deleteCandidates(_state.value.photos, _state.value.records, selected))
+            .filter { expected == null || PhotoIdentity(it.uri, it.signature) in expected }
+        if (requested.isEmpty()) return
+        if (fromGroups) {
+            saved["trashReturn"] = _state.value.screen
+            _state.update { it.copy(trashReturn = it.screen) }
+        }
         _deleteProgress.value = DeleteProgress()
         _state.update { it.copy(busy = true) }
         runDeletion {
             // Reconcile durable successes from an interrupted operation before starting a new one.
             val recovered = withContext(Dispatchers.IO) { deletion.recoverInterrupted() }
             if (recovered is DeleteStep.Complete) applyDeleteReport(recovered.report)
-            val candidates = ReviewRules.deleteCandidates(_state.value.photos, _state.value.records, selected)
+            val available = _state.value.photos.associateBy { PhotoIdentity(it.uri, it.signature) }
+            val candidates = requested.mapNotNull { available[PhotoIdentity(it.uri, it.signature)] }
             withContext(Dispatchers.IO) { deletion.start(candidates) }
         }
     }
@@ -279,6 +381,7 @@ class PhotoViewModel(application: Application, private val saved: SavedStateHand
         val screen = if (deleted.isNotEmpty()) "deleted" else _state.value.screen
         saved["deleteReportId"] = report.id
         saved["screen"] = screen
+        saved["deletedVideoCount"] = report.deleted.count { android.net.Uri.parse(it.uri).pathSegments.contains("video") }
         saved["deletedCount"] = deleted.size; saved["deletedBytes"] = bytes
         saved["deleteFailedCount"] = report.failed.size; saved["deleteCanceledCount"] = report.canceled.size
         val notice = when {
@@ -291,10 +394,11 @@ class PhotoViewModel(application: Application, private val saved: SavedStateHand
         _state.update {
             val library = LibrarySnapshot(it.photos, it.records).excluding(deleted)
             it.copy(photos = library.photos, records = library.records,
-            deletedCount = deleted.size, deletedBytes = bytes, deleteReportId = report.id,
+            deletedVideoCount = saved["deletedVideoCount"] ?: 0, deletedCount = deleted.size, deletedBytes = bytes, deleteReportId = report.id,
             showRatingInvitation = if (deleted.isNotEmpty()) ratingInvitation.isVisible() else it.showRatingInvitation,
             deleteFailedCount = report.failed.size,
             deleteCanceledCount = report.canceled.size, screen = if (deferResult && deleted.isNotEmpty()) "cleanupTransition" else screen, canUndo = false, message = notice, session = it.session?.reconcile(library.photos)) }
+        invalidateCleanup(_state.value.photos)
         saveSession()
         withContext(Dispatchers.IO) { deletion.acknowledge(report.id) }
     }

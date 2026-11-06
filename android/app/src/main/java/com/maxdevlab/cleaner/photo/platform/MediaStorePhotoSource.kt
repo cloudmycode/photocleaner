@@ -12,13 +12,20 @@ import com.maxdevlab.cleaner.photo.data.photoSignature
 /** Calls run on IO. One mapper serves old external URIs and newer per-volume URIs. */
 class MediaStorePhotoSource(private val context: Context, private val platform: PhotoPlatform = PhotoPlatform.current()) {
     private val scope = TestMediaScope(context)
-    private val columns get() = listOf(
+    private fun columns(video: Boolean) = listOf(
         MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.DATE_TAKEN,
         MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.DATE_MODIFIED, MediaStore.Images.Media.SIZE,
-        MediaStore.Images.Media.WIDTH, MediaStore.Images.Media.HEIGHT
-    ) + if (platform.supportsVolumes) listOf(MediaStore.Images.Media.VOLUME_NAME) else emptyList()
+        MediaStore.Images.Media.WIDTH, MediaStore.Images.Media.HEIGHT, MediaStore.Images.Media.BUCKET_DISPLAY_NAME
+    ) + (if (video) listOf(MediaStore.Video.Media.DURATION) else emptyList()) + if (platform.supportsVolumes) listOf(MediaStore.Images.Media.VOLUME_NAME, MediaStore.Images.Media.RELATIVE_PATH) else emptyList()
 
-    fun query(uri: Uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ids: List<String>? = null): List<Photo> {
+    fun query(uri: Uri? = null, ids: List<String>? = null): List<Photo> {
+        if (uri == null) {
+            val policy = PhotoAccessPolicy(context)
+            val images = if (policy.canReadImages()) query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI) else emptyList()
+            val videos = if (policy.canReadVideos()) query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI) else emptyList()
+            return (images + videos).sortedByDescending { it.takenAt }
+        }
+        val video = uri.pathSegments.contains("video")
         val conditions = mutableListOf<String>()
         val args = mutableListOf<String>()
         if (ids != null) {
@@ -35,10 +42,10 @@ class MediaStorePhotoSource(private val context: Context, private val platform: 
             args += names
         }
         return buildList {
-            context.contentResolver.query(uri, columns.toTypedArray(), conditions.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
+            context.contentResolver.query(uri, columns(video).toTypedArray(), conditions.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
                 args.takeIf { it.isNotEmpty() }?.toTypedArray(), "${MediaStore.Images.Media.DATE_TAKEN} DESC, ${MediaStore.Images.Media._ID} DESC")?.use { cursor ->
                 while (cursor.moveToNext()) {
-                    val photo = map(cursor)
+                    val photo = map(cursor, video)
                     if (scope.allows(photo.uri)) add(photo)
                 }
             }
@@ -73,14 +80,16 @@ class MediaStorePhotoSource(private val context: Context, private val platform: 
             }
         }
     }
-    private fun map(c: Cursor): Photo {
+    private fun map(c: Cursor, video: Boolean): Photo {
         fun number(name: String) = c.getLong(c.getColumnIndexOrThrow(name))
         fun text(name: String) = c.getString(c.getColumnIndexOrThrow(name))
-        val collection = if (platform.supportsVolumes) MediaStore.Images.Media.getContentUri(text(MediaStore.Images.Media.VOLUME_NAME)) else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val collection = if (video) { if (platform.supportsVolumes) MediaStore.Video.Media.getContentUri(text(MediaStore.Images.Media.VOLUME_NAME)) else MediaStore.Video.Media.EXTERNAL_CONTENT_URI } else if (platform.supportsVolumes) MediaStore.Images.Media.getContentUri(text(MediaStore.Images.Media.VOLUME_NAME)) else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val uri = ContentUris.withAppendedId(collection, number(MediaStore.Images.Media._ID)).toString()
         return Photo(uri, text(MediaStore.Images.Media.DISPLAY_NAME) ?: "Photo",
             number(MediaStore.Images.Media.DATE_TAKEN).takeIf { it > 0 } ?: number(MediaStore.Images.Media.DATE_ADDED) * 1000,
             number(MediaStore.Images.Media.SIZE).coerceAtLeast(0), number(MediaStore.Images.Media.WIDTH).toInt(),
-            number(MediaStore.Images.Media.HEIGHT).toInt(), number(MediaStore.Images.Media.DATE_MODIFIED))
+            number(MediaStore.Images.Media.HEIGHT).toInt(), number(MediaStore.Images.Media.DATE_MODIFIED),
+            if (platform.supportsVolumes) text(MediaStore.Images.Media.RELATIVE_PATH).orEmpty() else text(MediaStore.Images.Media.BUCKET_DISPLAY_NAME).orEmpty(),
+            number(MediaStore.Images.Media.DATE_TAKEN) > 0, video, if (video) number(MediaStore.Video.Media.DURATION) else 0)
     }
 }

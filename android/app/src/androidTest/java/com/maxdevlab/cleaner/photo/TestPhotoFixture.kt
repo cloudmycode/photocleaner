@@ -27,10 +27,32 @@ class TestPhotoFixture(private val context: Context) {
         }
         prefs.edit().clear().commit()
     }
-    fun create(count: Int = 3, large: Boolean = false, storeListing: Boolean = false) {
+    fun addVideo(): Uri {
+        check(Build.VERSION.SDK_INT >= 29)
+        val name = "photocleaner-fixture-${UUID.randomUUID()}.mp4"
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/PhotoCleanerTest")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+            put(MediaStore.Video.Media.DATE_TAKEN, Instant.parse("2026-09-25T12:00:00Z").toEpochMilli())
+        }
+        val uri = checkNotNull(context.contentResolver.insert(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values))
+        uris += uri
+        prefs.edit().putStringSet("uris", uris.map { it.toString() }.toSet())
+            .putStringSet("names", prefs.getStringSet("names", emptySet()).orEmpty() + name).commit()
+        context.contentResolver.openOutputStream(uri)!!.use { out ->
+            InstrumentationRegistry.getInstrumentation().context.assets.open("video-fixture.mp4").use { it.copyTo(out) }
+        }
+        context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+        return uri
+    }
+    fun create(count: Int = 3, large: Boolean = false, storeListing: Boolean = false, smartCleanup: Boolean = false) {
         cleanRegisteredPhotos()
         val names = mutableSetOf<String>()
-        val dates = if (storeListing) List(count) { index ->
+        val dates = if (smartCleanup) List(count) { index ->
+            Instant.parse("2026-10-24T12:00:00Z").plusSeconds(when (index) { 0 -> 86400L; 1 -> 172800L; 2, 3, 4 -> index.toLong(); else -> index * 86400L }).toString()
+        } else if (storeListing) List(count) { index ->
             "2026-${(10 - index / 8).toString().padStart(2, '0')}-${(24 - index % 8).toString().padStart(2, '0')}T12:00:00Z"
         } else if (count != 3) List(count) { Instant.parse("2026-09-01T12:00:00Z").plusSeconds(it.toLong() * 86400).toString() } else listOf("2026-09-20T12:00:00Z", "2026-09-15T12:00:00Z", "2026-08-15T12:00:00Z")
         dates.forEachIndexed { index, date ->
@@ -42,14 +64,15 @@ class TestPhotoFixture(private val context: Context) {
             }
             val legacyFile = if (Build.VERSION.SDK_INT < 29) File(context.getExternalFilesDir("Pictures"), name) else null
             if (Build.VERSION.SDK_INT >= 29) {
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/PhotoCleanerTest")
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, if (smartCleanup && index >= 6) "Pictures/Screenshots" else "Pictures/PhotoCleanerTest")
                 values.put(MediaStore.Images.Media.IS_PENDING, 1)
             } else {
                 legacyFile!!.parentFile!!.mkdirs()
                 @Suppress("DEPRECATION") values.put(MediaStore.Images.Media.DATA, legacyFile.absolutePath)
                 values.put(MediaStore.Images.Media.WIDTH, 800); values.put(MediaStore.Images.Media.HEIGHT, 1000)
             }
-            val asset = if (storeListing) listOf("store/coast.png", "store/lake.png", "store/dunes.png")[index % 3]
+            val asset = if (smartCleanup) when (index) { 0, 1 -> "lake.jpg"; 2, 3, 4 -> "mountain.jpg"; else -> "sea.jpg" }
+                else if (storeListing) listOf("store/coast.png", "store/lake.png", "store/dunes.png")[index % 3]
                 else listOf("lake.jpg", "mountain.jpg", "sea.jpg")[index % 3]
             val source = InstrumentationRegistry.getInstrumentation().context.assets.open(asset).use {
                 checkNotNull(BitmapFactory.decodeStream(it))

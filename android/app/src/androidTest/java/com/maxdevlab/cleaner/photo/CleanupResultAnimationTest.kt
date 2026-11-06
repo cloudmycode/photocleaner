@@ -50,7 +50,7 @@ class CleanupResultAnimationTest {
         assertTrue("Check should move above the result", settled < centered - 50f)
         compose.onNodeWithText(PhotoDetailFormat.size(bytes)).assertIsDisplayed()
         compose.onNodeWithText("24 photos deleted").assertIsDisplayed()
-        compose.onNodeWithText("Rate Photo Cleaner").assertIsDisplayed()
+        compose.onNodeWithText("Rate Tidy It").assertIsDisplayed()
         compose.onNodeWithText("Done").performClick()
         assertEquals(1, done)
         capture("03-complete-result")

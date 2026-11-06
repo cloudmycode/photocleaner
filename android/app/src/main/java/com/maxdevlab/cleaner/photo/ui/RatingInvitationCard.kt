@@ -24,10 +24,10 @@ import androidx.compose.ui.unit.dp
             DesignText("Share your experience", size = 15, weight = FontWeight.Medium)
         }
         Spacer(Modifier.height(6.dp))
-        DesignText("Your review helps improve Photo Cleaner.", size = 12, color = Muted,
+        DesignText("Your review helps improve Tidy It.", size = 12, color = Muted,
             align = androidx.compose.ui.text.style.TextAlign.Center)
         Spacer(Modifier.height(14.dp))
-        DesignButton("Rate Photo Cleaner", Modifier.fillMaxWidth(), enabled = enabled,
+        DesignButton("Rate Tidy It", Modifier.fillMaxWidth(), enabled = enabled,
             background = Accent, color = Color.White, onClick = rate)
     }
 }
